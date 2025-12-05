@@ -28,10 +28,26 @@ class PresidioService:
         if PRESIDIO_AVAILABLE:
             try:
                 # Configure NLP engine
+                # Try to use installed model, fallback to None if not found
+                try:
+                    import spacy
+                    if not spacy.util.is_package("en_core_web_sm"):
+                        if spacy.util.is_package("xx_core_web_sm"):
+                            model_name = "xx_core_web_sm"
+                        else:
+                            # No model found, force fallback
+                            raise OSError("No spacy model found")
+                    else:
+                        model_name = "en_core_web_sm"
+                except (ImportError, OSError):
+                    logger.warning("No compatible Spacy model found. Using regex fallback.")
+                    raise
+
                 configuration = {
                     "nlp_engine_name": "spacy",
                     "models": [
-                        {"lang_code": settings.PRESIDIO_LANGUAGE, "model_name": "xx_core_web_sm"}
+                        {"lang_code": settings.PRESIDIO_LANGUAGE, "model_name": model_name},
+                        {"lang_code": "en", "model_name": model_name}
                     ]
                 }
                 

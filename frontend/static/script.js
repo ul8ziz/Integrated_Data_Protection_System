@@ -1,8 +1,46 @@
 // Use relative URL to avoid CORS issues
 const API_BASE = window.location.origin || 'http://localhost:8000';
 
+// Sound effect for alerts (Simple beep/alert sound encoded in base64)
+const ALERT_SOUND = new Audio("data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU"); // Shortened placeholder, will use a real beep
+
+// Better beep sound (Base64)
+const BEEP_SOUND = "data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU"; 
+
+function playAlertSound() {
+    try {
+        // Create oscillator for a more reliable "beep" without external files
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (AudioContext) {
+            const ctx = new AudioContext();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            
+            osc.type = 'triangle'; // Alert-like sound
+            osc.frequency.setValueAtTime(880, ctx.currentTime); // High pitch (A5)
+            osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.5); // Drop pitch
+            
+            gain.gain.setValueAtTime(0.3, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+            
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            
+            osc.start();
+            osc.stop(ctx.currentTime + 0.5);
+        }
+    } catch (e) {
+        console.error("Audio play failed", e);
+    }
+}
+
 // Notification system (must be defined early)
 function showNotification(message, type = 'info') {
+    // Play sound for warnings and errors
+    if (type === 'error' || type === 'warning' || type === 'danger') {
+        playAlertSound();
+    }
+
     // Remove existing notifications
     const existing = document.querySelector('.notification');
     if (existing) {

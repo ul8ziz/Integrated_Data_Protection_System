@@ -90,6 +90,18 @@ class PolicyService:
                 ):
                     blocked = True
                     actions_taken.append(f"blocked_by_policy_{policy.id}")
+                    
+                    # Always create alert for blocked actions
+                    self._create_alert(
+                        db=db,
+                        policy=policy,
+                        detected_entities=relevant_entities,
+                        source_ip=source_ip,
+                        source_user=source_user,
+                        source_device=source_device,
+                        blocked=True
+                    )
+                    alert_created = True
             
             elif policy.action == "encrypt":
                 # Encrypt detected entities
