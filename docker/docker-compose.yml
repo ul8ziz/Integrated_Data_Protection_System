@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: athier_postgres
+    environment:
+      POSTGRES_USER: athier_user
+      POSTGRES_PASSWORD: athier_password
+      POSTGRES_DB: athier_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U athier_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Application
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: athier_backend
+    environment:
+      DATABASE_URL: postgresql://athier_user:athier_password@postgres:5432/athier_db
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-change-me-to-32-byte-key-in-production}
+      PRESIDIO_LANGUAGE: ${PRESIDIO_LANGUAGE:-ar}
+      MYDLP_ENABLED: ${MYDLP_ENABLED:-true}
+      MYDLP_API_URL: ${MYDLP_API_URL:-http://mydlp:8080}
+      DEBUG: ${DEBUG:-false}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../backend:/app
+      - ../logs:/app/logs
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  postgres_data:
+
