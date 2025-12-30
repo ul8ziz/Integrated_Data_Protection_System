@@ -9,7 +9,7 @@ def test_system():
     """Test the system endpoints"""
     base_url = "http://localhost:8000"
     
-    print("Testing Athier Data Protection System...")
+    print("Testing Secure Data Protection System...")
     print("=" * 50)
     
     # Wait for server to start

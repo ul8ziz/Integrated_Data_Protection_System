@@ -54,15 +54,15 @@ python -m spacy download en_core_web_sm
 ```bash
 # باستخدام psql
 psql -U postgres
-CREATE DATABASE athier_db;
-CREATE USER athier_user WITH PASSWORD 'athier_password';
-GRANT ALL PRIVILEGES ON DATABASE athier_db TO athier_user;
+CREATE DATABASE Secure_db;
+CREATE USER Secure_user WITH PASSWORD 'Secure_password';
+GRANT ALL PRIVILEGES ON DATABASE Secure_db TO Secure_user;
 ```
 
 #### أو باستخدام createdb:
 
 ```bash
-createdb -U postgres athier_db
+createdb -U postgres Secure_db
 ```
 
 ### 5. إعداد ملف البيئة / Environment Configuration

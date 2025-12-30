@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     """Application settings"""
     
     # Application
-    APP_NAME: str = "Athier Data Protection System"
+    APP_NAME: str = "Secure Data Protection System"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
     SECRET_KEY: str = os.getenv("SECRET_KEY", "change-me-in-production")
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
-        "postgresql://user:password@localhost:5432/athier_db"
+        "postgresql://user:password@localhost:5432/Secure_db"
     )
     
     # Encryption

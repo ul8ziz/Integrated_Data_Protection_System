@@ -44,24 +44,24 @@ def print_warning(text):
     except UnicodeEncodeError:
         print(f"[WARNING] {text}")
 
-def test_athier_health():
-    """Test Athier API health"""
-    print_header("Testing Athier API Health")
+def test_Secure_health():
+    """Test Secure API health"""
+    print_header("Testing Secure API Health")
     try:
         response = requests.get(f"{API_BASE}/health", timeout=5)
         if response.status_code == 200:
             data = response.json()
-            print_success("Athier is running")
+            print_success("Secure is running")
             print(f"  Name: {data.get('name', 'N/A')}")
             print(f"  Version: {data.get('version', 'N/A')}")
             print(f"  Status: {data.get('status', 'N/A')}")
             return True
         else:
-            print_error(f"Athier returned status {response.status_code}")
+            print_error(f"Secure returned status {response.status_code}")
             return False
     except Exception as e:
-        print_error(f"Cannot connect to Athier: {e}")
-        print_warning("Make sure Athier is running: python -m uvicorn app.main:app --host 127.0.0.1 --port 8000")
+        print_error(f"Cannot connect to Secure: {e}")
+        print_warning("Make sure Secure is running: python -m uvicorn app.main:app --host 127.0.0.1 --port 8000")
         return False
 
 def test_system_status():
@@ -216,13 +216,13 @@ def test_network_monitoring():
 def main():
     """Run all tests"""
     print("\n" + "=" * 60)
-    print("  Athier Data Protection System - Local Setup Test")
+    print("  Secure Data Protection System - Local Setup Test")
     print("=" * 60)
     print(f"\nTesting against: {API_BASE}")
     print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     
     results = {
-        "athier_health": test_athier_health(),
+        "Secure_health": test_Secure_health(),
         "system_status": test_system_status(),
         "text_analysis": test_text_analysis(),
         "email_monitoring": test_email_monitoring(),

@@ -20,22 +20,22 @@ def print_result(success, message):
     status = "OK" if success else "FAILED"
     print(f"{symbol} {message} - {status}")
 
-def test_athier_health():
-    """Test Athier API health"""
-    print_header("Testing Athier API")
+def test_Secure_health():
+    """Test Secure API health"""
+    print_header("Testing Secure API")
     try:
         response = requests.get(f"{BASE_URL}/health", timeout=5)
         if response.status_code == 200:
             data = response.json()
-            print_result(True, "Athier is running")
+            print_result(True, "Secure is running")
             print(f"  Status: {data.get('status', 'unknown')}")
             return True
         else:
-            print_result(False, f"Athier returned status {response.status_code}")
+            print_result(False, f"Secure returned status {response.status_code}")
             return False
     except Exception as e:
-        print_result(False, f"Cannot connect to Athier: {e}")
-        print(f"  Make sure Athier is running: python -m uvicorn app.main:app --host 127.0.0.1 --port 8000")
+        print_result(False, f"Cannot connect to Secure: {e}")
+        print(f"  Make sure Secure is running: python -m uvicorn app.main:app --host 127.0.0.1 --port 8000")
         return False
 
 def test_mydlp_status():
@@ -192,14 +192,14 @@ def test_network_monitoring():
 def main():
     """Run all tests"""
     print("\n" + "=" * 60)
-    print("  Athier Local Setup Test")
+    print("  Secure Local Setup Test")
     print("  Testing localhost configuration and email monitoring")
     print("=" * 60)
     
     results = []
     
-    # Test 1: Athier Health
-    results.append(("Athier Health", test_athier_health()))
+    # Test 1: Secure Health
+    results.append(("Secure Health", test_Secure_health()))
     
     # Test 2: MyDLP Status
     results.append(("MyDLP Status", test_mydlp_status()))
@@ -235,8 +235,8 @@ def main():
         return 0
     else:
         print("\n✗ Some tests failed. Please check the errors above.")
-        if not results[0][1]:  # Athier not running
-            print("\nTo start Athier:")
+        if not results[0][1]:  # Secure not running
+            print("\nTo start Secure:")
             print("  cd backend")
             print("  python -m uvicorn app.main:app --host 127.0.0.1 --port 8000")
         return 1

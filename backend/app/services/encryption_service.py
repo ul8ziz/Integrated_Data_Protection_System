@@ -23,7 +23,7 @@ class EncryptionService:
         Derive a Fernet key from a password using PBKDF2
         """
         # Use a fixed salt for consistency (in production, consider storing salt separately)
-        salt = b'athier_salt_2024'  # Should be unique per installation
+        salt = b'Secure_salt_2024'  # Should be unique per installation
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,

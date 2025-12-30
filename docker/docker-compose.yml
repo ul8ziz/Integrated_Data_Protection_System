@@ -4,17 +4,17 @@ services:
   # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
-    container_name: athier_postgres
+    container_name: Secure_postgres
     environment:
-      POSTGRES_USER: athier_user
-      POSTGRES_PASSWORD: athier_password
-      POSTGRES_DB: athier_db
+      POSTGRES_USER: Secure_user
+      POSTGRES_PASSWORD: Secure_password
+      POSTGRES_DB: Secure_db
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U athier_user"]
+      test: ["CMD-SHELL", "pg_isready -U Secure_user"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -24,9 +24,9 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: athier_backend
+    container_name: Secure_backend
     environment:
-      DATABASE_URL: postgresql://athier_user:athier_password@postgres:5432/athier_db
+      DATABASE_URL: postgresql://Secure_user:Secure_password@postgres:5432/Secure_db
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-change-me-to-32-byte-key-in-production}
       PRESIDIO_LANGUAGE: ${PRESIDIO_LANGUAGE:-ar}
       MYDLP_ENABLED: ${MYDLP_ENABLED:-true}

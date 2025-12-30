@@ -290,6 +290,114 @@ header::before {
     color: var(--dark);
 }
 
+/* Sub-tabs for Analysis Mode */
+.sub-tabs-container {
+    display: flex;
+    gap: 12px;
+    margin: 24px 0;
+    padding: 0;
+    border-bottom: 2px solid var(--border);
+}
+
+.sub-tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    color: var(--gray);
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s;
+    position: relative;
+    bottom: -2px;
+}
+
+.sub-tab-btn:hover {
+    color: var(--primary);
+    background: rgba(99, 102, 241, 0.05);
+}
+
+.sub-tab-btn.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+    font-weight: 600;
+}
+
+.sub-tab-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+/* Analysis Mode Sections */
+.analysis-mode-section {
+    display: none;
+    animation: fadeIn 0.3s ease-in;
+}
+
+.analysis-mode-section.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* File Upload */
+.file-upload-area {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 40px;
+    text-align: center;
+    background: white;
+    cursor: pointer;
+    transition: all 0.3s;
+    position: relative;
+}
+
+.file-upload-area:hover {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.02);
+}
+
+.file-upload-area.dragover {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.05);
+    transform: scale(1.02);
+}
+
+.file-upload-content {
+    pointer-events: none;
+}
+
+.file-upload-area.has-file {
+    border-color: var(--success);
+    background: rgba(16, 185, 129, 0.05);
+}
+
+.file-upload-text {
+    font-size: 1rem;
+    color: var(--dark);
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+.file-upload-hint {
+    font-size: 0.875rem;
+    color: var(--gray);
+    margin-top: 8px;
+}
+
 /* Buttons */
 .btn {
     display: inline-flex;

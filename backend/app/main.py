@@ -55,11 +55,11 @@ try:
     # __file__ = backend/app/main.py
     # app_dir = backend/app
     # backend_dir = backend
-    # project_root = athier (project root)
+    # project_root = Secure (project root)
     current_file = os.path.abspath(__file__)
     app_dir = os.path.dirname(current_file)  # backend/app
     backend_dir = os.path.dirname(app_dir)   # backend
-    project_root = os.path.dirname(backend_dir)  # athier (project root)
+    project_root = os.path.dirname(backend_dir)  # Secure (project root)
     
     static_dir = os.path.join(project_root, "frontend", "static")
     logger.info(f"Static files directory: {static_dir}")

@@ -101,7 +101,7 @@ transport_maps = hash:/etc/postfix/transport
 2. **إنشاء script لإعادة التوجيه**:
 ```bash
 #!/bin/bash
-# /usr/local/bin/forward_to_athier.sh
+# /usr/local/bin/forward_to_Secure.sh
 
 EMAIL_FILE="$1"
 API_URL="http://127.0.0.1:8000/api/email/receive/raw"
@@ -113,8 +113,8 @@ curl -X POST "$API_URL" \
 
 3. **تعديل Postfix master.cf**:
 ```conf
-athier unix - n n - - pipe
-  flags=F user=nobody argv=/usr/local/bin/forward_to_athier.sh ${queue_directory}/${nexthop}
+Secure unix - n n - - pipe
+  flags=F user=nobody argv=/usr/local/bin/forward_to_Secure.sh ${queue_directory}/${nexthop}
 ```
 
 ---
@@ -159,7 +159,7 @@ response = requests.get(
     headers={"Authorization": f"Bearer {token['access_token']}"}
 )
 
-# Forward to Athier
+# Forward to Secure
 for message in response.json()['value']:
     email_data = {
         "from": message['from']['emailAddress']['address'],
@@ -205,7 +205,7 @@ for msg in messages:
     # Get body
     body = message['payload']['body']['data']
     
-    # Send to Athier
+    # Send to Secure
     email_data = {
         "from": from_email,
         "to": [to_email],
@@ -252,7 +252,7 @@ for msg_num in messages[0].split():
     subject = msg['Subject']
     body = msg.get_payload()
     
-    # Send to Athier
+    # Send to Secure
     email_data = {
         "from": from_email,
         "to": [to_email],

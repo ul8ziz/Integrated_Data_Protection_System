@@ -9,7 +9,7 @@ All project phases have been completed successfully!
 ## 📁 هيكل المشروع / Project Structure
 
 ```
-athier/
+Secure/
 ├── presidio/              ✅ Microsoft Presidio (cloned)
 ├── mydlp/                 ✅ MyDLP CE (cloned)
 ├── backend/               ✅ FastAPI Application

@@ -3,9 +3,9 @@
 
 ## نظرة عامة / Overview
 
-نظام **Athier** يحل مشاكل حقيقية في أنظمة حماية البيانات (DLP) التقليدية من خلال دمج الذكاء النصي مع آليات المنع الفعالة.
+نظام **Secure** يحل مشاكل حقيقية في أنظمة حماية البيانات (DLP) التقليدية من خلال دمج الذكاء النصي مع آليات المنع الفعالة.
 
-The **Athier** system solves real problems in traditional Data Loss Prevention (DLP) systems by integrating text intelligence with effective blocking mechanisms.
+The **Secure** system solves real problems in traditional Data Loss Prevention (DLP) systems by integrating text intelligence with effective blocking mechanisms.
 
 ---
 
@@ -24,7 +24,7 @@ The **Athier** system solves real problems in traditional Data Loss Prevention (
   - عنوان منزل
   - معلومات طبية حساسة
 
-**الحل في Athier:**
+**الحل في Secure:**
 - استخدام **Microsoft Presidio** لتحليل النصوص بذكاء
 - Presidio يستخدم **NLP (Natural Language Processing)** لاكتشاف البيانات الحساسة بدقة
 - النظام يدمج Presidio مع MyDLP:
@@ -35,7 +35,7 @@ The **Athier** system solves real problems in traditional Data Loss Prevention (
 **مثال عملي:**
 ```
 ❌ نظام DLP تقليدي: يمنع جميع الإيميلات التي تحتوي كلمة "رقم"
-✅ Athier: يكتشف أن "1234-5678-9012-3456" هو رقم بطاقة ائتمان حقيقي، ويمنع فقط الإيميلات التي تحتوي بطاقات ائتمان فعلية
+✅ Secure: يكتشف أن "1234-5678-9012-3456" هو رقم بطاقة ائتمان حقيقي، ويمنع فقط الإيميلات التي تحتوي بطاقات ائتمان فعلية
 ```
 
 ---
@@ -55,7 +55,7 @@ The **Athier** system solves real problems in traditional Data Loss Prevention (
   - لا توفر سجلات مفصلة عن نوع البيانات المكتشفة
   - لا تثبت الامتثال للمعايير
 
-**الحل في Athier:**
+**الحل في Secure:**
 - **اكتشاف دقيق**: Presidio يحدد نوع البيانات بدقة (PERSON, CREDIT_CARD, PHONE_NUMBER, إلخ)
 - **سياسات متوافقة**: نظام سياسات يدعم علامات GDPR و HIPAA
 - **سجلات مفصلة**: كل اكتشاف يُسجل مع:
@@ -67,7 +67,7 @@ The **Athier** system solves real problems in traditional Data Loss Prevention (
 
 **مثال عملي:**
 ```
-✅ Athier يسجل:
+✅ Secure يسجل:
 - تم اكتشاف: CREDIT_CARD
 - القيمة: [مشفرة]
 - السياسة: "Block Credit Cards" (GDPR Compliant)
@@ -87,7 +87,7 @@ The **Athier** system solves real problems in traditional Data Loss Prevention (
   - ينبه على أي نص يحتوي كلمات معينة (حتى لو لم تكن بيانات حساسة)
   - النتيجة: **إزعاج** للمستخدمين والإدارة بسبب الإنذارات الكاذبة
 
-**الحل في Athier:**
+**الحل في Secure:**
 - **Presidio يحلل النصوص بذكاء**:
   - يميّز بين رقم عادي ورقم بطاقة ائتمان
   - يميّز بين اسم عادي واسم شخص حقيقي
@@ -101,10 +101,10 @@ The **Athier** system solves real problems in traditional Data Loss Prevention (
 **مثال عملي:**
 ```
 ❌ MyDLP لوحده: ينبه على "رقم الطلب: 12345" (رقم عادي)
-✅ Athier: لا ينبه لأن Presidio لم يكتشف بيانات حساسة حقيقية
+✅ Secure: لا ينبه لأن Presidio لم يكتشف بيانات حساسة حقيقية
 
 ❌ MyDLP لوحده: ينبه على "رقم: 4532-1234-5678-9010" (رقم بطاقة ائتمان)
-✅ Athier: ينبه بدقة لأن Presidio اكتشف أنه رقم بطاقة ائتمان حقيقي
+✅ Secure: ينبه بدقة لأن Presidio اكتشف أنه رقم بطاقة ائتمان حقيقي
 ```
 
 ---
@@ -124,7 +124,7 @@ The **Athier** system solves real problems in traditional Data Loss Prevention (
   - **فجوات في الحماية**: قد تفوت بعض التهديدات
   - **تكلفة عالية**: ترخيص عدة أنظمة
 
-**الحل في Athier:**
+**الحل في Secure:**
 - **نظام متكامل واحد** يجمع:
   - ✅ **اكتشاف ذكي** (Presidio)
   - ✅ **منع فعال** (MyDLP)
@@ -188,7 +188,7 @@ The **Athier** system solves real problems in traditional Data Loss Prevention (
 
 ## الخلاصة / Summary
 
-**Athier** يحل المشاكل الأساسية في أنظمة DLP التقليدية من خلال:
+**Secure** يحل المشاكل الأساسية في أنظمة DLP التقليدية من خلال:
 
 1. ✅ **دمج الذكاء النصي** (Presidio) مع **آليات المنع** (MyDLP)
 2. ✅ **تقليل الإنذارات الكاذبة** من خلال الاكتشاف الدقيق

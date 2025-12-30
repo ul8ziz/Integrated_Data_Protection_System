@@ -1,5 +1,5 @@
 """
-Athier Data Protection System
+Secure Data Protection System
 نظام حماية البيانات المتكامل
 """
 

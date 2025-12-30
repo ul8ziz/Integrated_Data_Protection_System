@@ -38,7 +38,7 @@ cd backend
 
 ```env
 # Application Settings
-APP_NAME=Athier Data Protection System
+APP_NAME=Secure Data Protection System
 APP_VERSION=1.0.0
 DEBUG=true
 SECRET_KEY=change-me-to-secure-key-in-production-please
@@ -166,7 +166,7 @@ curl -X POST http://127.0.0.1:8000/api/analyze/ \
 
 ## إعدادات المنافذ / Port Configuration
 
-- **8000**: Athier FastAPI Application
+- **8000**: Secure FastAPI Application
 - **8080**: MyDLP Web API (إذا كان مثبتاً)
 - **10026**: MyDLP SMTP Proxy (إذا كان مثبتاً)
 - **1344**: MyDLP ICAP Server (إذا كان مثبتاً)
@@ -183,7 +183,7 @@ python test_local_mydlp.py
 ```
 
 هذا الاختبار يتحقق من:
-- ✅ صحة Athier API
+- ✅ صحة Secure API
 - ✅ حالة النظام
 - ✅ تحليل النصوص
 - ✅ مراقبة الإيميل
@@ -207,7 +207,7 @@ python test_local_mydlp.py
 
 ### خطأ في الاتصال / Connection Error
 
-**المشكلة**: Cannot connect to Athier
+**المشكلة**: Cannot connect to Secure
 
 **الحل**: 
 1. تأكد من أن الخادم يعمل:

@@ -1,4 +1,4 @@
 """
-Tests for Athier Data Protection System
+Tests for Secure Data Protection System
 """
 

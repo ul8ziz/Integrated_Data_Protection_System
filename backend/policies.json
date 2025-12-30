@@ -1,0 +1,172 @@
+[
+    {
+        "name": "Block Credit Cards",
+        "description": "Automatically block any transmission containing credit card numbers",
+        "entity_types": [
+            "CREDIT_CARD"
+        ],
+        "action": "block",
+        "severity": "critical",
+        "enabled": true,
+        "apply_to_network": true,
+        "apply_to_devices": true,
+        "apply_to_storage": true,
+        "gdpr_compliant": true,
+        "hipaa_compliant": true,
+        "created_by": "system"
+    },
+    {
+        "name": "Alert on Personal Information",
+        "description": "Send alerts when personal information (names, phone numbers, emails) is detected",
+        "entity_types": [
+            "PERSON",
+            "PHONE_NUMBER",
+            "EMAIL_ADDRESS"
+        ],
+        "action": "alert",
+        "severity": "high",
+        "enabled": true,
+        "apply_to_network": true,
+        "apply_to_devices": true,
+        "apply_to_storage": true,
+        "gdpr_compliant": true,
+        "hipaa_compliant": false,
+        "created_by": "system"
+    },
+    {
+        "name": "Block Email Addresses in External Communications",
+        "description": "Prevent sending email addresses to external recipients",
+        "entity_types": [
+            "EMAIL_ADDRESS"
+        ],
+        "action": "block",
+        "severity": "high",
+        "enabled": true,
+        "apply_to_network": true,
+        "apply_to_devices": false,
+        "apply_to_storage": false,
+        "gdpr_compliant": true,
+        "hipaa_compliant": false,
+        "created_by": "system"
+    },
+    {
+        "name": "Alert on Phone Numbers",
+        "description": "Monitor and alert when phone numbers are detected in communications",
+        "entity_types": [
+            "PHONE_NUMBER"
+        ],
+        "action": "alert",
+        "severity": "medium",
+        "enabled": true,
+        "apply_to_network": true,
+        "apply_to_devices": true,
+        "apply_to_storage": true,
+        "gdpr_compliant": true,
+        "hipaa_compliant": true,
+        "created_by": "system"
+    },
+    {
+        "name": "Block Physical Addresses",
+        "description": "Prevent transmission of physical addresses to external parties",
+        "entity_types": [
+            "ADDRESS"
+        ],
+        "action": "block",
+        "severity": "high",
+        "enabled": true,
+        "apply_to_network": true,
+        "apply_to_devices": true,
+        "apply_to_storage": false,
+        "gdpr_compliant": true,
+        "hipaa_compliant": false,
+        "created_by": "system"
+    },
+    {
+        "name": "GDPR Compliance - Block All PII",
+        "description": "Comprehensive GDPR compliance policy - blocks all personally identifiable information",
+        "entity_types": [
+            "PERSON",
+            "PHONE_NUMBER",
+            "EMAIL_ADDRESS",
+            "ADDRESS",
+            "CREDIT_CARD"
+        ],
+        "action": "block",
+        "severity": "critical",
+        "enabled": true,
+        "apply_to_network": true,
+        "apply_to_devices": true,
+        "apply_to_storage": true,
+        "gdpr_compliant": true,
+        "hipaa_compliant": true,
+        "created_by": "system"
+    },
+    {
+        "name": "HIPAA Compliance - Healthcare Data Protection",
+        "description": "HIPAA compliance policy for protecting healthcare-related personal information",
+        "entity_types": [
+            "PERSON",
+            "PHONE_NUMBER",
+            "EMAIL_ADDRESS",
+            "ADDRESS"
+        ],
+        "action": "block",
+        "severity": "critical",
+        "enabled": true,
+        "apply_to_network": true,
+        "apply_to_devices": true,
+        "apply_to_storage": true,
+        "gdpr_compliant": false,
+        "hipaa_compliant": true,
+        "created_by": "system"
+    },
+    {
+        "name": "Monitor Organization Names",
+        "description": "Alert when organization names are detected in communications",
+        "entity_types": [
+            "ORGANIZATION"
+        ],
+        "action": "alert",
+        "severity": "low",
+        "enabled": true,
+        "apply_to_network": true,
+        "apply_to_devices": false,
+        "apply_to_storage": false,
+        "gdpr_compliant": false,
+        "hipaa_compliant": false,
+        "created_by": "system"
+    },
+    {
+        "name": "Test Policy",
+        "description": "Test",
+        "entity_types": [
+            "PERSON",
+            "EMAIL_ADDRESS"
+        ],
+        "action": "alert",
+        "severity": "medium",
+        "enabled": true,
+        "apply_to_network": true,
+        "apply_to_devices": true,
+        "apply_to_storage": true,
+        "gdpr_compliant": false,
+        "hipaa_compliant": false,
+        "created_by": null
+    },
+    {
+        "name": "Strict Phone Blocking",
+        "description": "Block any communication containing phone numbers immediately",
+        "entity_types": [
+            "PHONE_NUMBER"
+        ],
+        "action": "block",
+        "severity": "high",
+        "enabled": true,
+        "apply_to_network": true,
+        "apply_to_devices": true,
+        "apply_to_storage": true,
+        "gdpr_compliant": false,
+        "hipaa_compliant": false,
+        "created_by": null
+    }
+]

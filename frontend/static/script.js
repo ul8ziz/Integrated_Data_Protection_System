@@ -95,6 +95,160 @@ function showTab(tabName, element) {
     }
 }
 
+// Analysis Mode Switching
+function switchAnalysisMode(mode, buttonElement) {
+    // Remove active class from all sub-tabs
+    document.querySelectorAll('.sub-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // Add active class to clicked button
+    if (buttonElement) {
+        buttonElement.classList.add('active');
+    }
+    
+    // Hide all sections
+    document.querySelectorAll('.analysis-mode-section').forEach(section => {
+        section.classList.remove('active');
+    });
+    
+    // Show selected section
+    if (mode === 'file') {
+        document.getElementById('fileAnalysisSection').classList.add('active');
+    } else if (mode === 'text') {
+        document.getElementById('textAnalysisSection').classList.add('active');
+    }
+}
+
+// File Upload functions
+function initFileUpload() {
+    const fileInput = document.getElementById('fileInput');
+    const fileUploadArea = document.getElementById('fileUploadArea');
+    const analyzeFileBtn = document.getElementById('analyzeFileBtn');
+    const selectedFileName = document.getElementById('selectedFileName');
+    const fileUploadText = document.getElementById('fileUploadText');
+    
+    if (!fileInput || !fileUploadArea || !analyzeFileBtn) return;
+    
+    // Click to browse
+    fileUploadArea.addEventListener('click', () => {
+        fileInput.click();
+    });
+    
+    // File selected
+    fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            handleFileSelect(file);
+        }
+    });
+    
+    // Drag and drop
+    fileUploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        fileUploadArea.classList.add('dragover');
+    });
+    
+    fileUploadArea.addEventListener('dragleave', () => {
+        fileUploadArea.classList.remove('dragover');
+    });
+    
+    fileUploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        fileUploadArea.classList.remove('dragover');
+        
+        const file = e.dataTransfer.files[0];
+        if (file) {
+            fileInput.files = e.dataTransfer.files;
+            handleFileSelect(file);
+        }
+    });
+    
+    function handleFileSelect(file) {
+        // Check file type
+        const allowedTypes = ['.pdf', '.docx', '.txt', '.xlsx'];
+        const fileExt = '.' + file.name.split('.').pop().toLowerCase();
+        
+        if (!allowedTypes.includes(fileExt)) {
+            showNotification(`Unsupported file type. Supported: ${allowedTypes.join(', ')}`, 'error');
+            fileInput.value = '';
+            return;
+        }
+        
+        // Update UI
+        selectedFileName.textContent = `Selected: ${file.name}`;
+        selectedFileName.style.display = 'block';
+        fileUploadText.textContent = file.name;
+        fileUploadArea.classList.add('has-file');
+        analyzeFileBtn.disabled = false;
+    }
+    
+    // Analyze file button
+    analyzeFileBtn.addEventListener('click', async () => {
+        const file = fileInput.files[0];
+        if (!file) {
+            showNotification('Please select a file first', 'warning');
+            return;
+        }
+        
+        await analyzeFile(file);
+    });
+}
+
+async function analyzeFile(file) {
+    const analyzeFileBtn = document.getElementById('analyzeFileBtn');
+    const applyPoliciesFile = document.getElementById('applyPoliciesFile');
+    const resultBox = document.getElementById('analysisResult');
+    const resultContent = document.getElementById('resultContent');
+    
+    if (!file) {
+        showNotification('Please select a file', 'warning');
+        return;
+    }
+    
+    // Show loading
+    const originalText = analyzeFileBtn.innerHTML;
+    analyzeFileBtn.disabled = true;
+    analyzeFileBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg><span>Analyzing...</span>';
+    
+    if (resultBox) {
+        resultBox.style.display = 'none';
+    }
+    
+    try {
+        // Create FormData
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('apply_policies', applyPoliciesFile ? applyPoliciesFile.checked : true);
+        
+        const response = await fetch('/api/analyze/file', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+            throw new Error(errorData.detail || `Server error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Display results
+        if (resultBox && resultContent) {
+            displayAnalysisResult(data, file.name);
+            resultBox.style.display = 'block';
+        }
+        
+        showNotification('File analysis completed successfully', 'success');
+    } catch (error) {
+        console.error('Error analyzing file:', error);
+        showNotification('Error: ' + error.message, 'error');
+    } finally {
+        analyzeFileBtn.disabled = false;
+        analyzeFileBtn.innerHTML = originalText;
+    }
+}
+
 // Analysis functions
 async function analyzeText() {
     console.log('analyzeText function called');
@@ -155,7 +309,13 @@ async function analyzeText() {
         const data = await response.json();
         console.log('Response data:', data);
         
-        if (resultBox) {
+        // Display results - determine which result box to use
+        const isFileMode = document.getElementById('fileAnalysisSection').classList.contains('active');
+        const targetResultBox = isFileMode 
+            ? document.getElementById('analysisResult')
+            : document.getElementById('analysisResultText');
+        
+        if (targetResultBox) {
             displayAnalysisResult(data);
         }
         showNotification('Analysis completed successfully', 'success');
@@ -175,13 +335,26 @@ async function analyzeText() {
     }
 }
 
-function displayAnalysisResult(result) {
-    const resultBox = document.getElementById('analysisResult');
-    const resultContent = document.getElementById('resultContent');
+function displayAnalysisResult(result, fileName = null) {
+    // Determine which result box to use based on active mode
+    const isFileMode = document.getElementById('fileAnalysisSection').classList.contains('active');
+    const resultBox = isFileMode 
+        ? document.getElementById('analysisResult')
+        : document.getElementById('analysisResultText');
+    const resultContent = isFileMode
+        ? document.getElementById('resultContent')
+        : document.getElementById('resultContentText');
     
     if (!resultBox || !resultContent) return;
     
     let html = '';
+    
+    // Show file name if provided
+    if (fileName) {
+        html += `<div style="margin-bottom: 16px; padding: 12px; background: var(--light); border-radius: 8px; border-left: 4px solid var(--primary);">
+            <strong>File:</strong> ${fileName}
+        </div>`;
+    }
     
     if (result.sensitive_data_detected) {
         html += `<div class="alert-banner alert-danger">
@@ -706,6 +879,7 @@ async function testEmail(event) {
 // Make functions globally available
 window.analyzeText = analyzeText;
 window.showTab = showTab;
+window.switchAnalysisMode = switchAnalysisMode;
 window.loadPolicies = loadPolicies;
 window.loadAlerts = loadAlerts;
 window.loadMonitoringData = loadMonitoringData;
@@ -720,6 +894,15 @@ window.testEmail = testEmail;
 // Load data on page load
 window.addEventListener('DOMContentLoaded', () => {
     console.log('DOM loaded, initializing...');
+    
+    // Initialize file upload
+    initFileUpload();
+    
+    // Set default mode to file analysis
+    const fileTabBtn = document.querySelector('.sub-tab-btn');
+    if (fileTabBtn) {
+        switchAnalysisMode('file', fileTabBtn);
+    }
     
     // Verify elements exist
     const textInput = document.getElementById('textInput');
