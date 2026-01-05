@@ -59,5 +59,7 @@ def init_db():
     """
     Initialize database tables
     """
+    # Import all models to ensure they are registered
+    from app.models import users, policies, alerts, logs
     Base.metadata.create_all(bind=engine)
 

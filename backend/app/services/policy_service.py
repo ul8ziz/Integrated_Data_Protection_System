@@ -53,11 +53,38 @@ class PolicyService:
         # Analyze text with Presidio
         detected_entities = self.presidio.analyze(text)
         
+        return self.apply_policy_with_entities(
+            db=db,
+            detected_entities=detected_entities,
+            text=text,
+            source_ip=source_ip,
+            source_user=source_user,
+            source_device=source_device
+        )
+    
+    def apply_policy_with_entities(self, db: Session, detected_entities: List[Dict], 
+                                   text: str = None, source_ip: str = None, 
+                                   source_user: str = None, source_device: str = None) -> Dict[str, Any]:
+        """
+        Apply policies using pre-detected entities (avoids re-analysis)
+        
+        Args:
+            db: Database session
+            detected_entities: Pre-detected entities from Presidio
+            text: Original text (optional, for logging)
+            source_ip: Source IP address
+            source_user: Source user
+            source_device: Source device
+            
+        Returns:
+            Result dictionary with actions taken
+        """
         if not detected_entities:
             return {
                 "sensitive_data_detected": False,
                 "actions_taken": [],
-                "blocked": False
+                "blocked": False,
+                "alert_created": False
             }
         
         # Get active policies
@@ -77,19 +104,27 @@ class PolicyService:
             ]
             
             if not relevant_entities:
+                logger.debug(f"Policy {policy.id} ({policy.name}) does not apply - no matching entities")
                 continue
+            
+            logger.info(f"Policy {policy.id} ({policy.name}) applies - {len(relevant_entities)} relevant entities")
             
             # Apply policy action
             if policy.action == "block":
-                # Block with MyDLP
-                if self.mydlp.block_data_transfer(
+                logger.info(f"Applying block action for policy {policy.id} ({policy.name})")
+                # Block with MyDLP (returns True even if MyDLP is disabled - simulation mode)
+                block_result = self.mydlp.block_data_transfer(
                     source_ip=source_ip or "unknown",
                     destination="external",
                     detected_entities=relevant_entities,
                     reason=f"Policy violation: {policy.name}"
-                ):
+                )
+                logger.info(f"block_data_transfer returned: {block_result}")
+                
+                if block_result:
                     blocked = True
                     actions_taken.append(f"blocked_by_policy_{policy.id}")
+                    logger.info(f"Email blocked by policy {policy.id} ({policy.name})")
                     
                     # Always create alert for blocked actions
                     self._create_alert(
@@ -102,6 +137,8 @@ class PolicyService:
                         blocked=True
                     )
                     alert_created = True
+                else:
+                    logger.warning(f"block_data_transfer returned False for policy {policy.id}")
             
             elif policy.action == "encrypt":
                 # Encrypt detected entities
@@ -125,26 +162,27 @@ class PolicyService:
                     actions_taken.append("alert_created")
         
         # Log the event
-        self._log_event(
-            db=db,
-            event_type="policy_applied",
-            message=f"Applied policies to text, detected {len(detected_entities)} entities",
-            source_ip=source_ip,
-            source_user=source_user,
-            metadata={
-                "detected_entities_count": len(detected_entities),
-                "policies_applied": len(policies),
-                "blocked": blocked
-            }
-        )
-        
-        # Store detected entities
-        for entity in detected_entities:
-            self._store_detected_entity(
+        if text:
+            self._log_event(
                 db=db,
-                entity=entity,
-                source_text_hash=self.encryption.hash_text(text)
+                event_type="policy_applied",
+                message=f"Applied policies, detected {len(detected_entities)} entities",
+                source_ip=source_ip,
+                source_user=source_user,
+                metadata={
+                    "detected_entities_count": len(detected_entities),
+                    "policies_applied": len(policies),
+                    "blocked": blocked
+                }
             )
+            
+            # Store detected entities
+            for entity in detected_entities:
+                self._store_detected_entity(
+                    db=db,
+                    entity=entity,
+                    source_text_hash=self.encryption.hash_text(text)
+                )
         
         return {
             "sensitive_data_detected": True,

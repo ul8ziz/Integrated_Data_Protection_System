@@ -8,6 +8,7 @@ from datetime import datetime
 from app.database import get_db
 from app.schemas.alerts import AlertResponse, AlertUpdate
 from app.models.alerts import Alert, AlertStatus
+from app.api.dependencies import get_current_admin
 
 router = APIRouter(prefix="/api/alerts", tags=["Alerts"])
 
@@ -17,7 +18,8 @@ async def get_alerts(
     status: Optional[str] = None,
     severity: Optional[str] = None,
     limit: int = 100,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin)  # Admin only
 ):
     """
     Get all alerts, optionally filtered by status and severity
@@ -83,7 +85,8 @@ async def get_alerts(
 @router.get("/{alert_id}", response_model=AlertResponse)
 async def get_alert(
     alert_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin)  # Admin only
 ):
     """
     Get a specific alert by ID
@@ -98,7 +101,8 @@ async def get_alert(
 async def update_alert(
     alert_id: int,
     alert_update: AlertUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin)  # Admin only
 ):
     """
     Update an alert (e.g., acknowledge or resolve)
@@ -132,7 +136,10 @@ async def update_alert(
 
 
 @router.get("/stats/summary")
-async def get_alert_stats(db: Session = Depends(get_db)):
+async def get_alert_stats(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin)  # Admin only
+):
     """
     Get alert statistics summary
     """

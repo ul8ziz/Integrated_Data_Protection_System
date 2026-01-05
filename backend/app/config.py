@@ -5,8 +5,11 @@ from pydantic_settings import BaseSettings
 from typing import List
 import os
 from dotenv import load_dotenv
+import os
 
-load_dotenv()
+# Load .env file from backend directory
+env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+load_dotenv(env_path)
 
 
 class Settings(BaseSettings):
@@ -38,7 +41,14 @@ class Settings(BaseSettings):
     )
     
     # MyDLP
-    MYDLP_ENABLED: bool = os.getenv("MYDLP_ENABLED", "true").lower() == "true"
+    # Force enable MyDLP by default - can be overridden by environment variable
+    # Default to True if not explicitly set to False
+    _mydlp_env = os.getenv("MYDLP_ENABLED", "").strip().lower()
+    if _mydlp_env in ("false", "0", "no", "off"):
+        MYDLP_ENABLED: bool = False
+    else:
+        # Default to True (if empty or any other value)
+        MYDLP_ENABLED: bool = True
     MYDLP_API_URL: str = os.getenv("MYDLP_API_URL", "http://localhost:8080")
     MYDLP_API_KEY: str = os.getenv("MYDLP_API_KEY", "")
     

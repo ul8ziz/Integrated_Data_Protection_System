@@ -1,12 +1,10 @@
 @echo off
 REM Start script with persistent window and MyDLP monitoring
-REM يبدأ المشروع مع نافذة دائمة ومراقبة MyDLP
 
 setlocal enabledelayedexpansion
 
 echo ========================================
 echo Integrated Data Protection System
-echo نظام حماية البيانات المتكامل
 echo ========================================
 echo.
 
@@ -44,7 +42,11 @@ REM Install requirements
 echo Installing/updating packages...
 "%PYTHON%" -m pip install -q --upgrade pip
 "%PYTHON%" -m pip install -q -r "%BACKEND_PATH%\requirements.txt"
+REM Ensure critical packages are installed
 "%PYTHON%" -m pip install -q python-multipart
+"%PYTHON%" -m pip install -q python-jose[cryptography]
+"%PYTHON%" -m pip install -q passlib[bcrypt]
+"%PYTHON%" -m pip install -q email-validator
 
 REM Go to backend
 cd /d "%BACKEND_PATH%"

@@ -8,6 +8,7 @@ from app.database import get_db
 from app.schemas.policies import PolicyCreate, PolicyUpdate, PolicyResponse
 from app.models.policies import Policy
 from app.services.mydlp_service import MyDLPService
+from app.api.dependencies import get_current_admin
 
 router = APIRouter(prefix="/api/policies", tags=["Policies"])
 
@@ -17,7 +18,8 @@ mydlp_service = MyDLPService()
 @router.post("/", response_model=PolicyResponse, status_code=201)
 async def create_policy(
     policy: PolicyCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin)  # Admin only
 ):
     """
     Create a new data protection policy
@@ -54,7 +56,8 @@ async def create_policy(
 @router.get("/", response_model=List[PolicyResponse])
 async def get_policies(
     enabled: bool = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin)  # Admin only
 ):
     """
     Get all policies, optionally filtered by enabled status
@@ -72,7 +75,8 @@ async def get_policies(
 @router.get("/{policy_id}", response_model=PolicyResponse)
 async def get_policy(
     policy_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin)  # Admin only
 ):
     """
     Get a specific policy by ID
@@ -87,7 +91,8 @@ async def get_policy(
 async def update_policy(
     policy_id: int,
     policy_update: PolicyUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin)  # Admin only
 ):
     """
     Update an existing policy
@@ -117,7 +122,8 @@ async def update_policy(
 @router.delete("/{policy_id}", status_code=204)
 async def delete_policy(
     policy_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin)  # Admin only
 ):
     """
     Delete a policy

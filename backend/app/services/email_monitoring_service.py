@@ -82,9 +82,11 @@ class EmailMonitoringService:
                     "message": "No sensitive data detected"
                 }
             
-            # Apply policies
-            policy_result = self.policy_service.apply_policy(
+            # Apply policies with detected entities
+            # Pass detected_entities to avoid re-analyzing
+            policy_result = self.policy_service.apply_policy_with_entities(
                 db=db,
+                detected_entities=detected_entities,
                 text=full_text,
                 source_ip=source_ip,
                 source_user=source_user,

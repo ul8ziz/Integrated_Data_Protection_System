@@ -1,245 +1,127 @@
 # Secure - نظام حماية البيانات المتكامل
 # Integrated Data Protection System
 
-نظام متكامل لحماية البيانات الشخصية داخل المؤسسات يجمع بين Microsoft Presidio و MyDLP CE.
+نظام متكامل لحماية البيانات الشخصية داخل المؤسسات يجمع بين Microsoft Presidio و MyDLP CE، مع نظام إدارة مستخدمين وصلاحيات متكامل.
 
-An integrated system for protecting personal data within organizations, combining Microsoft Presidio and MyDLP CE.
+An integrated system for protecting personal data within organizations, combining Microsoft Presidio and MyDLP CE, with a complete user management and permission system.
 
 ## المميزات / Features
 
 - 🔍 **تحليل النصوص**: اكتشاف البيانات الحساسة تلقائياً باستخدام Presidio
 - 📄 **فحص الملفات**: رفع وتحليل الملفات (PDF, DOCX, TXT, XLSX) لاكتشاف البيانات الحساسة
 - 🛡️ **منع التسرب**: مراقبة ومنع تسرب البيانات باستخدام MyDLP CE
-- 📊 **لوحة تحكم**: واجهة إدارة كاملة للسياسات والتنبيهات
-- 🔐 **تشفير**: تشفير البيانات الحساسة قبل التخزين
+- 👥 **إدارة المستخدمين**: نظام متكامل لإدارة المستخدمين والصلاحيات (Admin/User)
+- 🔐 **المصادقة**: تسجيل دخول آمن، إنشاء حسابات، وموافقة المدراء
+- 📊 **لوحة تحكم**: واجهة إدارة كاملة للسياسات والتنبيهات والمستخدمين
+- 📧 **مراقبة البريد**: محاكاة واختبار مراقبة البريد الإلكتروني
 - 📝 **سجلات**: تسجيل شامل لجميع الأحداث والأنشطة
 - ⚖️ **الامتثال**: دعم معايير GDPR و HIPAA
 
 ## المتطلبات / Requirements
 
 - Python 3.8+
-- PostgreSQL 12+
-- Git (لتحميل Presidio و MyDLP)
+- PostgreSQL 12+ (أو SQLite للاختبار)
+- Git
 
-## التثبيت / Installation
+## التثبيت والتشغيل السريع / Quick Start
 
-### 1. استنساخ المستودعات / Clone Repositories
-
-```bash
-# Clone Presidio
-git clone https://github.com/microsoft/presidio.git
-
-# Clone MyDLP CE
-git clone https://github.com/mydlp/mydlp.git
-```
-
-### 2. إعداد البيئة الافتراضية / Setup Virtual Environment
+### الطريقة السهلة (Windows)
 
 ```bash
-# إنشاء بيئة افتراضية
-python -m venv venv
-
-# تفعيل البيئة (Windows)
-venv\Scripts\activate
-
-# تفعيل البيئة (Linux/Mac)
-source venv/bin/activate
-```
-
-### 3. تثبيت التبعيات / Install Dependencies
-
-```bash
-cd backend
-pip install -r requirements.txt
-```
-
-### 4. إعداد قاعدة البيانات / Database Setup
-
-```bash
-# إنشاء قاعدة البيانات في PostgreSQL
-createdb Secure_db
-
-# أو باستخدام psql
-psql -U postgres
-CREATE DATABASE Secure_db;
-```
-
-### 5. إعداد ملف البيئة / Environment Configuration
-
-```bash
-# نسخ ملف البيئة
-cp .env.example .env
-
-# تعديل القيم حسب الحاجة
-# Edit .env file with your settings
-```
-
-### 6. تهيئة قاعدة البيانات / Initialize Database
-
-```bash
-cd backend
-python -c "from app.database import init_db; init_db()"
-```
-
-## التشغيل / Running
-
-### الطريقة السهلة (موصى بها) / Easy Way (Recommended)
-
-**Windows:**
-```bash
-# الطريقة العادية (سيرفر فقط):
+# انقر نقراً مزدوجاً على الملف أو من PowerShell:
 .\start.bat
 
-# مع مراقبة MyDLP (نافذتان - سيرفر + مراقبة):
+# أو للتشغيل مع مراقبة MyDLP:
 .\start_monitor.bat
-
-# أو من PowerShell:
-.\start.ps1
 ```
 
-**ملاحظة:** `start_monitor.bat` يفتح نافذتين:
-- نافذة السيرفر (تظهر سجلات uvicorn)
-- نافذة مراقبة MyDLP (تعرض حالة MyDLP والتنبيهات في الوقت الفعلي)
+### الطريقة اليدوية / Manual Installation
 
-**Linux/Mac:**
-```bash
-chmod +x start.sh
-./start.sh
-```
+1. **استنساخ المستودع / Clone Repository**
+   ```bash
+   git clone https://github.com/username/secure-dlp.git
+   cd secure-dlp
+   ```
 
-الـ script سيقوم تلقائياً بـ:
-- ✅ فحص البيئة الافتراضية (venv)
-- ✅ إنشاء البيئة إذا لم تكن موجودة
-- ✅ تثبيت جميع المكتبات المطلوبة
-- ✅ تفعيل البيئة
-- ✅ تشغيل السيرفر
-- ✅ فتح المتصفح تلقائياً
+2. **إعداد البيئة / Setup Environment**
+   ```bash
+   python -m venv venv
+   # Windows
+   venv\Scripts\activate
+   # Linux/Mac
+   source venv/bin/activate
+   ```
 
-### الطريقة اليدوية / Manual Way
+3. **تثبيت التبعيات / Install Dependencies**
+   ```bash
+   cd backend
+   pip install -r requirements.txt
+   # تثبيت مكتبات المصادقة والملفات
+   pip install python-multipart python-jose[cryptography] passlib[bcrypt] email-validator
+   ```
 
-```bash
-# 1. إنشاء وتفعيل البيئة الافتراضية
-python -m venv venv
+4. **تهيئة قاعدة البيانات / Initialize Database**
+   ```bash
+   python init_db.py
+   # سيتم إنشاء مستخدم admin افتراضي:
+   # Username: admin
+   # Password: admin123
+   ```
 
-# Windows
-venv\Scripts\activate
+5. **التشغيل / Run**
+   ```bash
+   uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+   ```
 
-# Linux/Mac
-source venv/bin/activate
+## دليل المستخدم / User Guide
 
-# 2. تثبيت المكتبات
-cd backend
-pip install -r requirements.txt
-pip install python-multipart  # مطلوب لرفع الملفات
+### 1. تسجيل الدخول / Login
+- عند فتح النظام، ستظهر شاشة تسجيل الدخول
+- **Admin**: الدخول بصلاحيات كاملة (إدارة المستخدمين والسياسات)
+- **User**: الدخول بصلاحيات محدودة (فحص الملفات والنصوص)
+- **إنشاء حساب**: يمكن للزوار إنشاء حساب جديد (يحتاج موافقة المدير)
 
-# 3. تشغيل السيرفر
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
+### 2. فحص البيانات / Data Analysis
+- **File Analysis**: رفع ملفات (PDF, Word, Excel) لفحصها
+- **Text Analysis**: كتابة نص مباشرة للفحص السريع
 
-ثم افتح المتصفح على: `http://localhost:8000` أو `http://127.0.0.1:8000`
+### 3. إدارة المستخدمين (للمدراء فقط)
+- عرض قائمة المستخدمين
+- الموافقة على طلبات التسجيل الجديدة
+- تفعيل/تعطيل الحسابات
 
-## الوثائق / Documentation
-
-- API Documentation: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+### 4. إدارة السياسات (للمدراء فقط)
+- إنشاء سياسات حماية جديدة
+- تحديد أنواع البيانات المحظورة (Credit Cards, Phones, etc.)
+- تحديد الإجراء (Block, Alert, Encrypt)
 
 ## API Endpoints
 
-### تحليل النصوص / Text Analysis
-- `POST /api/analyze/` - تحليل نص لاكتشاف البيانات الحساسة
-- `POST /api/analyze/file` - رفع ملف وتحليله لاكتشاف البيانات الحساسة (يدعم PDF, DOCX, TXT, XLSX)
-- `GET /api/analyze/entities` - الحصول على أنواع الكيانات المدعومة
-- `GET /api/analyze/file/formats` - الحصول على أنواع الملفات المدعومة
+### المصادقة / Authentication
+- `POST /api/auth/login` - تسجيل الدخول
+- `POST /api/auth/register` - إنشاء حساب جديد
 
-### إدارة السياسات / Policy Management
-- `GET /api/policies/` - الحصول على جميع السياسات
-- `POST /api/policies/` - إنشاء سياسة جديدة
-- `GET /api/policies/{id}` - الحصول على سياسة محددة
-- `PUT /api/policies/{id}` - تحديث سياسة
-- `DELETE /api/policies/{id}` - حذف سياسة
+### المستخدمين / Users (Admin)
+- `GET /api/users/` - عرض المستخدمين
+- `GET /api/users/pending` - طلبات التسجيل المعلقة
+- `POST /api/users/{id}/approve` - الموافقة على مستخدم
 
-### التنبيهات / Alerts
-- `GET /api/alerts/` - الحصول على جميع التنبيهات
-- `GET /api/alerts/{id}` - الحصول على تنبيه محدد
-- `PUT /api/alerts/{id}` - تحديث حالة التنبيه
-- `GET /api/alerts/stats/summary` - إحصائيات التنبيهات
+### التحليل / Analysis
+- `POST /api/analyze/` - تحليل نص
+- `POST /api/analyze/file` - تحليل ملف
 
-### المراقبة والتقارير / Monitoring & Reports
+### المراقبة / Monitoring
+- `POST /api/monitoring/email` - فحص بريد إلكتروني
 - `GET /api/monitoring/status` - حالة النظام
-- `POST /api/monitoring/traffic` - مراقبة حركة البيانات
-- `GET /api/monitoring/reports/summary` - تقرير ملخص
-- `GET /api/monitoring/reports/logs` - تقرير السجلات
 
-## هيكل المشروع / Project Structure
+## التقنيات المستخدمة / Technologies
 
-```
-Secure/
-├── presidio/          # Microsoft Presidio (cloned)
-├── mydlp/             # MyDLP CE (cloned)
-├── backend/           # FastAPI application
-│   ├── app/
-│   │   ├── api/       # API routes
-│   │   ├── models/    # Database models
-│   │   ├── services/  # Business logic
-│   │   └── schemas/   # Pydantic schemas
-│   └── requirements.txt
-├── frontend/          # Frontend interface
-├── tests/             # Tests
-└── docs/              # Documentation
-```
-
-## التطوير / Development
-
-### إضافة سياسة جديدة / Adding a New Policy
-
-```python
-# Example: Create a policy via API
-POST /api/policies/
-{
-    "name": "Block Credit Cards",
-    "entity_types": ["CREDIT_CARD"],
-    "action": "block",
-    "severity": "high",
-    "enabled": true
-}
-```
-
-### اختبار التحليل / Testing Analysis
-
-```python
-# Example: Analyze text
-POST /api/analyze/
-{
-    "text": "My phone number is 123-456-7890",
-    "apply_policies": true
-}
-
-# Example: Analyze uploaded file
-POST /api/analyze/file
-FormData:
-  - file: (PDF, DOCX, TXT, or XLSX file)
-  - apply_policies: true
-  - source_user: "user@example.com" (optional)
-```
-
-### استخدام واجهة الويب / Using Web Interface
-
-1. افتح المتصفح على `http://localhost:8000`
-2. اختر تبويب "Text Analysis"
-3. يمكنك:
-   - **رفع ملف**: انقر على منطقة رفع الملفات أو اسحب الملف
-   - **تحليل نص**: اكتب النص مباشرة في المربع
-4. النتائج ستظهر تلقائياً مع تفاصيل البيانات الحساسة المكتشفة
+- **Backend**: FastAPI, SQLAlchemy, Pydantic
+- **Frontend**: HTML5, CSS3, JavaScript (Native)
+- **AI/NLP**: Microsoft Presidio
+- **Database**: PostgreSQL / SQLite
+- **Security**: OAuth2, JWT, Bcrypt
 
 ## الترخيص / License
 
 هذا المشروع مفتوح المصدر / This project is open source.
-
-## المساهمة / Contributing
-
-نرحب بالمساهمات! يرجى فتح issue أو pull request.
-
-Contributions welcome! Please open an issue or pull request.
-
-https://mydlp.com/
-https://www.packetfence.org/about.html

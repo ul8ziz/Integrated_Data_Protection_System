@@ -1,7 +1,7 @@
 """
 API routes for text analysis
 """
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import tempfile
@@ -12,6 +12,8 @@ from app.schemas.analysis import AnalysisRequest, AnalysisResponse, DetectedEnti
 from app.services.policy_service import PolicyService
 from app.services.presidio_service import PresidioService
 from app.services.file_extractor_service import FileTextExtractor
+from app.api.dependencies import get_optional_user
+from app.models.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,7 @@ file_extractor = FileTextExtractor()
 @router.post("/", response_model=AnalysisResponse)
 async def analyze_text(
     request: AnalysisRequest,
+    http_request: Request,
     db: Session = Depends(get_db)
 ):
     """
@@ -41,11 +44,16 @@ async def analyze_text(
     try:
         if request.apply_policies:
             # Apply policies (includes Presidio analysis)
+            # Try to get current user
+            current_user = await get_optional_user(http_request, db)
+            # Use current user if logged in and source_user not provided
+            source_user = request.source_user or (current_user.username if current_user else None)
+            
             result = policy_service.apply_policy(
                 db=db,
                 text=request.text,
                 source_ip=request.source_ip,
-                source_user=request.source_user,
+                source_user=source_user,
                 source_device=request.source_device
             )
             
@@ -88,6 +96,7 @@ async def analyze_file(
     source_ip: Optional[str] = Form(None),
     source_user: Optional[str] = Form(None),
     source_device: Optional[str] = Form(None),
+    http_request: Request = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -135,6 +144,11 @@ async def analyze_file(
                 alert_created=False
             )
         
+        # Try to get current user
+        current_user = await get_optional_user(http_request, db) if http_request else None
+        # Use current user if logged in and source_user not provided
+        final_source_user = source_user or (current_user.username if current_user else None)
+        
         # Analyze extracted text
         if apply_policies:
             # Apply policies (includes Presidio analysis)
@@ -142,7 +156,7 @@ async def analyze_file(
                 db=db,
                 text=extracted_text,
                 source_ip=source_ip,
-                source_user=source_user,
+                source_user=final_source_user,
                 source_device=source_device
             )
             

@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import init_db
 from app.api.routes import analysis, policies, alerts, monitoring
-from app.api.routes import email_receiver
+from app.api.routes import email_receiver, auth, users
 import logging
 import os
 
@@ -43,11 +43,19 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(auth.router)
+app.include_router(users.router)
 app.include_router(analysis.router)
 app.include_router(policies.router)
 app.include_router(alerts.router)
 app.include_router(monitoring.router)
 app.include_router(email_receiver.router)
+
+# Test-only routes (only available when ENVIRONMENT=test)
+import os
+if os.getenv("ENVIRONMENT", "").lower() == "test":
+    from app.api.routes import test_seed
+    app.include_router(test_seed.router)
 
 # Mount static files for frontend
 try:
@@ -89,6 +97,38 @@ async def startup_event():
         # Initialize database
         init_db()
         logger.info("Database initialized")
+        
+        # Create default admin if doesn't exist
+        from app.database import SessionLocal
+        from app.models.users import User, UserRole, UserStatus
+        from app.services.auth_service import get_password_hash
+        from datetime import datetime
+        
+        db = SessionLocal()
+        try:
+            admin = db.query(User).filter(User.role == UserRole.ADMIN).first()
+            if not admin:
+                logger.info("Creating default admin user...")
+                try:
+                    admin_password = "admin123"
+                    hashed_password = get_password_hash(admin_password)
+                    admin_user = User(
+                        username="admin",
+                        email="admin@example.com",
+                        hashed_password=hashed_password,
+                        role=UserRole.ADMIN,
+                        status=UserStatus.ACTIVE,
+                        is_active=True,
+                        approved_at=datetime.utcnow()
+                    )
+                    db.add(admin_user)
+                    db.commit()
+                    logger.info("Default admin created: username=admin, password=admin123")
+                except Exception as e:
+                    logger.error(f"Error creating admin user: {e}")
+                    db.rollback()
+        finally:
+            db.close()
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
 

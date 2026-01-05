@@ -91,6 +91,13 @@ if [ $? -ne 0 ]; then
     echo "✅ python-multipart installed!"
 fi
 
+# Ensure authentication packages are installed
+echo ""
+echo "Ensuring authentication packages are installed..."
+"$PYTHON_CMD" -m pip install python-jose[cryptography] --quiet
+"$PYTHON_CMD" -m pip install passlib[bcrypt] --quiet
+"$PYTHON_CMD" -m pip install email-validator --quiet
+
 # Change to backend directory
 cd "$BACKEND_PATH"
 

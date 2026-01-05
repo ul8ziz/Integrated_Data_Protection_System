@@ -1,7 +1,7 @@
 """
 API routes for monitoring and reports
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 from datetime import datetime, timedelta
@@ -11,18 +11,57 @@ from app.models.alerts import Alert
 from app.models.policies import Policy
 from app.services.mydlp_service import MyDLPService
 from app.services.email_monitoring_service import EmailMonitoringService
+from app.api.dependencies import get_current_admin, get_optional_user
 
 router = APIRouter(prefix="/api/monitoring", tags=["Monitoring"])
 
+# Initialize services
+# Note: MyDLPService reads config at initialization, so it will use the latest config
+# when the module is loaded. If config changes, server restart is needed.
 mydlp_service = MyDLPService()
 email_monitoring = EmailMonitoringService()
 
+# Log initial MyDLP status for debugging
+import logging
+logger = logging.getLogger(__name__)
+logger.info(f"MyDLP service initialized - enabled: {mydlp_service.is_enabled()}, API URL: {mydlp_service.api_url}")
+
 
 @router.get("/status")
-async def get_system_status():
+async def get_system_status(
+    current_user = Depends(get_current_admin)  # Admin only
+):
     """
     Get system status and component health
     """
+    # Read MyDLP enabled status directly from environment variable
+    # This ensures we always get the current value, even if server wasn't restarted
+    import os
+    from dotenv import load_dotenv
+    
+    # Reload .env file to get latest values
+    # Try multiple possible paths for .env file
+    current_dir = os.path.dirname(__file__)  # app/api/routes/
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))  # backend/
+    env_path = os.path.join(backend_dir, '.env')
+    if not os.path.exists(env_path):
+        # Fallback: try current working directory
+        env_path = os.path.join(os.getcwd(), '.env')
+    load_dotenv(env_path, override=True)
+    
+    # Read MYDLP_ENABLED directly from environment
+    _mydlp_env = os.getenv("MYDLP_ENABLED", "").strip().lower()
+    if _mydlp_env in ("false", "0", "no", "off"):
+        mydlp_enabled = False
+    else:
+        # Default to True (if empty or any other value)
+        mydlp_enabled = True
+    
+    # Create MyDLP service
+    current_mydlp = MyDLPService()
+    # Override enabled status with fresh value from env
+    current_mydlp.enabled = mydlp_enabled
+    
     return {
         "status": "operational",
         "presidio": {
@@ -30,9 +69,9 @@ async def get_system_status():
             "status": "operational"
         },
         "mydlp": {
-            "enabled": mydlp_service.is_enabled(),
-            "status": "operational" if mydlp_service.is_enabled() else "disabled",
-            "is_localhost": mydlp_service.is_local() if mydlp_service.is_enabled() else False
+            "enabled": mydlp_enabled,
+            "status": "operational" if mydlp_enabled else "disabled",
+            "is_localhost": current_mydlp.is_local() if mydlp_enabled else False
         },
         "timestamp": datetime.now().isoformat()
     }
@@ -41,7 +80,8 @@ async def get_system_status():
 @router.post("/traffic")
 async def monitor_traffic(
     traffic_data: Dict[str, Any],
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin)  # Admin only
 ):
     """
     Monitor network traffic for sensitive data
@@ -58,7 +98,8 @@ async def monitor_traffic(
 @router.get("/reports/summary")
 async def get_summary_report(
     days: int = 7,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin)  # Admin only
 ):
     """
     Get summary report for the last N days
@@ -115,7 +156,8 @@ async def get_logs_report(
     event_type: str = None,
     level: str = None,
     limit: int = 100,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin)  # Admin only
 ):
     """
     Get logs report
@@ -154,10 +196,12 @@ async def get_logs_report(
 @router.post("/email")
 async def monitor_email(
     email_data: Dict[str, Any],
+    http_request: Request,
     db: Session = Depends(get_db)
 ):
     """
     Monitor and analyze email for sensitive data
+    Available to all authenticated users
     
     This endpoint receives email data and analyzes it for sensitive information.
     If sensitive data is detected, the email may be blocked based on policies.
@@ -173,6 +217,8 @@ async def monitor_email(
         "source_user": "user@example.com"  # optional
     }
     """
+    # Optional: get current user if authenticated (not required, but preferred)
+    current_user = await get_optional_user(http_request, db)
     try:
         result = email_monitoring.analyze_email(db=db, email_data=email_data)
         return result
@@ -183,7 +229,8 @@ async def monitor_email(
 @router.get("/email/statistics")
 async def get_email_statistics(
     days: int = 7,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin)  # Admin only
 ):
     """
     Get email monitoring statistics
@@ -200,7 +247,8 @@ async def get_email_statistics(
 @router.get("/email/logs")
 async def get_email_logs(
     limit: int = 50,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin)  # Admin only
 ):
     """
     Get email monitoring logs

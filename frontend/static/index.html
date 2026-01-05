@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,26 +10,110 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
+
 <body>
     <div class="container">
         <header>
             <div class="header-content">
                 <div class="logo">
                     <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                            stroke-linejoin="round" />
+                        <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                            stroke-linejoin="round" />
                     </svg>
                 </div>
                 <div class="header-text">
                     <h1>Secure Data Protection System</h1>
                     <p>Advanced AI-Powered Data Loss Prevention Platform</p>
                 </div>
+                <div class="header-auth" id="headerAuth">
+                    <!-- Will be populated by JavaScript -->
+                    <div id="authButtons" style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary btn-small" onclick="showLoginModal()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                                <polyline points="10 17 15 12 10 7"></polyline>
+                                <line x1="15" y1="12" x2="3" y2="12"></line>
+                            </svg>
+                            Login
+                        </button>
+                        <button class="btn btn-primary btn-small" onclick="showRegisterModal()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="8.5" cy="7" r="4"></circle>
+                                <line x1="20" y1="8" x2="20" y2="14"></line>
+                                <line x1="23" y1="11" x2="17" y2="11"></line>
+                            </svg>
+                            Register
+                        </button>
+                    </div>
+                    <div id="userInfo" style="display: none;" data-testid="user-info">
+                        <div class="user-badge">
+                            <span id="userName"></span>
+                            <span id="userRole" class="role-badge" data-testid="user-role"></span>
+                        </div>
+                        <button class="btn btn-secondary btn-small" onclick="logout()" data-testid="logout-btn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                                <polyline points="16 17 21 12 16 7"></polyline>
+                                <line x1="21" y1="12" x2="9" y2="12"></line>
+                            </svg>
+                            Logout
+                        </button>
+                    </div>
+                </div>
             </div>
         </header>
 
-        <nav class="tabs">
-            <button class="tab-btn active" onclick="showTab('analysis', this)">
+        <!-- Login Required Overlay - Must be first to cover everything -->
+        <div id="loginRequiredOverlay" class="login-overlay" data-testid="login-overlay" style="display: flex; z-index: 99999;">
+            <div class="login-overlay-content">
+                <div class="login-welcome">
+                    <div class="login-logo">
+                        <svg width="80" height="80" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round" stroke-linejoin="round" />
+                            <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round" />
+                            <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round" />
+                        </svg>
+                    </div>
+                    <h2>Secure System</h2>
+                    <p>Protected Environment for Sensitive Data Analysis</p>
+                </div>
+                <div class="login-actions">
+                    <button class="btn btn-primary btn-large" id="overlayLoginBtn" type="button" data-testid="overlay-login-btn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                            <polyline points="10 17 15 12 10 7"></polyline>
+                            <line x1="15" y1="12" x2="3" y2="12"></line>
+                        </svg>
+                        Login
+                    </button>
+                    <button class="btn btn-secondary btn-large" id="overlayRegisterBtn" type="button" data-testid="overlay-register-btn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="8.5" cy="7" r="4"></circle>
+                            <line x1="20" y1="8" x2="20" y2="14"></line>
+                            <line x1="23" y1="11" x2="17" y2="11"></line>
+                        </svg>
+                        Create Account
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <nav class="tabs" id="mainTabs">
+            <button class="tab-btn active" onclick="showTab('analysis', this)" data-testid="analysis-tab">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                     <polyline points="14 2 14 8 20 8"></polyline>
@@ -36,23 +121,23 @@
                     <line x1="16" y1="17" x2="8" y2="17"></line>
                     <polyline points="10 9 9 9 8 9"></polyline>
                 </svg>
-                <span>Text Analysis</span>
+                <span>Analysis</span>
             </button>
-            <button class="tab-btn" onclick="showTab('policies', this)">
+            <button class="tab-btn" id="policiesTabBtn" onclick="showTab('policies', this)" style="display: none;" data-testid="policies-tab">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
                     <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                 </svg>
                 <span>Policies</span>
             </button>
-            <button class="tab-btn" onclick="showTab('alerts', this)">
+            <button class="tab-btn" id="alertsTabBtn" onclick="showTab('alerts', this)" style="display: none;" data-testid="alerts-tab">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
                     <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
                 </svg>
                 <span>Alerts</span>
             </button>
-            <button class="tab-btn" onclick="showTab('monitoring', this)">
+            <button class="tab-btn" id="monitoringTabBtn" onclick="showTab('monitoring', this)" style="display: none;" data-testid="monitoring-tab">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="18" y1="20" x2="18" y2="10"></line>
                     <line x1="12" y1="20" x2="12" y2="4"></line>
@@ -60,13 +145,30 @@
                 </svg>
                 <span>Monitoring</span>
             </button>
+            <button class="tab-btn" id="testEmailTabBtn" onclick="showTab('testEmail', this)" data-testid="test-email-tab">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                    <polyline points="22,6 12,13 2,6"></polyline>
+                </svg>
+                <span>Test Email</span>
+            </button>
+            <button class="tab-btn" id="usersTabBtn" onclick="showTab('users', this)" style="display: none;" data-testid="users-tab">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="9" cy="7" r="4"></circle>
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                </svg>
+                <span>Users</span>
+            </button>
         </nav>
 
         <!-- Analysis Tab -->
-        <div id="analysis" class="tab-content active">
+        <div id="analysis" class="tab-content active" data-testid="analysis-tab-content">
             <div class="content-header">
                 <h2>Sensitive Data Detection & Analysis</h2>
-                <p class="subtitle">Analyze text content or upload files to identify and protect sensitive information</p>
+                <p class="subtitle">Analyze text content or upload files to identify and protect sensitive information
+                </p>
             </div>
             
             <!-- Sub-tabs for File vs Text Analysis -->
@@ -79,7 +181,7 @@
                     </svg>
                     <span>File Analysis</span>
                 </button>
-                <button class="sub-tab-btn" onclick="switchAnalysisMode('text', this)">
+                <button class="sub-tab-btn" onclick="switchAnalysisMode('text', this)" data-testid="text-analysis-mode-btn">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                         <polyline points="14 2 14 8 20 8"></polyline>
@@ -89,14 +191,15 @@
                     <span>Text Analysis</span>
                 </button>
             </div>
-            
+
             <!-- File Upload Section -->
             <div id="fileAnalysisSection" class="analysis-mode-section active">
                 <div class="analysis-container">
                     <div class="form-card">
                         <div class="form-group">
                             <label for="fileInput">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
                                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                                     <polyline points="17 8 12 3 7 8"></polyline>
                                     <line x1="12" y1="3" x2="12" y2="15"></line>
@@ -106,18 +209,21 @@
                             <div class="file-upload-area" id="fileUploadArea">
                                 <input type="file" id="fileInput" accept=".pdf,.docx,.txt,.xlsx" style="display: none;">
                                 <div class="file-upload-content">
-                                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 16px; opacity: 0.5;">
+                                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2" style="margin-bottom: 16px; opacity: 0.5;">
                                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                                         <polyline points="17 8 12 3 7 8"></polyline>
                                         <line x1="12" y1="3" x2="12" y2="15"></line>
                                     </svg>
                                     <p id="fileUploadText">Click to browse or drag and drop file here</p>
                                     <p class="file-upload-hint">Supported formats: PDF, DOCX, TXT, XLSX</p>
-                                    <p id="selectedFileName" style="display: none; margin-top: 12px; font-weight: 500; color: var(--primary);"></p>
+                                    <p id="selectedFileName"
+                                        style="display: none; margin-top: 12px; font-weight: 500; color: var(--primary);">
+                                    </p>
                                 </div>
                             </div>
                         </div>
-                        
+
                         <div class="form-options">
                             <label class="checkbox-modern">
                                 <input type="checkbox" id="applyPoliciesFile" checked>
@@ -125,20 +231,22 @@
                                 <span class="checkbox-label">Apply policies automatically</span>
                             </label>
                         </div>
-                        
+
                         <button id="analyzeFileBtn" class="btn btn-primary btn-large" disabled>
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
                                 <circle cx="12" cy="12" r="10"></circle>
                                 <polyline points="12 6 12 12 16 14"></polyline>
                             </svg>
                             <span>Analyze File</span>
                         </button>
                     </div>
-                    
+
                     <div id="analysisResult" class="result-card" style="display: none;">
                         <div class="result-header">
                             <h3>
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
                                     <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
                                 </svg>
                                 Analysis Results
@@ -151,52 +259,52 @@
             
             <!-- Text Analysis Section -->
             <div id="textAnalysisSection" class="analysis-mode-section">
-                <div class="analysis-container">
-                    <div class="form-card">
-                        <div class="form-group">
-                            <label for="textInput">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                                    <polyline points="14 2 14 8 20 8"></polyline>
-                                    <line x1="16" y1="13" x2="8" y2="13"></line>
-                                    <line x1="16" y1="17" x2="8" y2="17"></line>
-                                </svg>
-                                Text to Analyze
-                            </label>
-                            <textarea 
-                                id="textInput" 
-                                rows="12" 
-                                placeholder="Enter text containing sensitive data such as names, phone numbers, emails, credit cards, etc..."
-                                class="textarea-modern"
-                            ></textarea>
-                        </div>
-                        
-                        <div class="form-options">
-                            <label class="checkbox-modern">
-                                <input type="checkbox" id="applyPolicies" checked>
-                                <span class="checkmark"></span>
-                                <span class="checkbox-label">Apply policies automatically</span>
-                            </label>
-                        </div>
-                        
-                        <button id="analyzeBtn" class="btn btn-primary btn-large">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <circle cx="12" cy="12" r="10"></circle>
-                                <polyline points="12 6 12 12 16 14"></polyline>
+            <div class="analysis-container">
+                <div class="form-card">
+                    <div class="form-group">
+                        <label for="textInput">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                                <line x1="16" y1="13" x2="8" y2="13"></line>
+                                <line x1="16" y1="17" x2="8" y2="17"></line>
                             </svg>
-                            <span>Analyze Text</span>
-                        </button>
+                            Text to Analyze
+                        </label>
+                            <textarea id="textInput" rows="12"
+                            placeholder="Enter text containing sensitive data such as names, phone numbers, emails, credit cards, etc..."
+                                class="textarea-modern" data-testid="text-input"></textarea>
                     </div>
                     
-                    <div id="analysisResultText" class="result-card" style="display: none;">
-                        <div class="result-header">
-                            <h3>
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-                                </svg>
-                                Analysis Results
-                            </h3>
-                        </div>
+                    <div class="form-options">
+                        <label class="checkbox-modern">
+                            <input type="checkbox" id="applyPolicies" checked>
+                            <span class="checkmark"></span>
+                            <span class="checkbox-label">Apply policies automatically</span>
+                        </label>
+                    </div>
+                    
+                        <button id="analyzeBtn" class="btn btn-primary btn-large" data-testid="analyze-text-btn">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                        <span>Analyze Text</span>
+                    </button>
+                </div>
+                
+                    <div id="analysisResultText" class="result-card" style="display: none;" data-testid="analysis-results">
+                    <div class="result-header">
+                        <h3>
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                            </svg>
+                            Analysis Results
+                        </h3>
+                    </div>
                         <div id="resultContentText"></div>
                     </div>
                 </div>
@@ -204,28 +312,29 @@
         </div>
 
         <!-- Policies Tab -->
-        <div id="policies" class="tab-content">
-            <div class="content-header">
-                <h2>Policy Management</h2>
-                <p class="subtitle">Create and manage data protection policies</p>
-            </div>
-            
-            <div class="action-bar">
-                <button onclick="loadPolicies()" class="btn btn-secondary">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="23 4 23 10 17 10"></polyline>
-                        <polyline points="1 20 1 14 7 14"></polyline>
-                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-                    </svg>
-                    Refresh
-                </button>
-                <button onclick="showCreatePolicyForm()" class="btn btn-primary">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                    </svg>
-                    New Policy
-                </button>
+        <div id="policies" class="tab-content" style="display: none;">
+            <div class="content-header policy-header">
+                <div class="header-title-group">
+                    <h2 class="policy-title">Policy Management</h2>
+                    <p class="subtitle policy-subtitle">Create and manage data protection policies</p>
+                </div>
+                <div class="action-bar policy-actions">
+                    <button onclick="loadPolicies()" class="btn btn-ghost btn-sm">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <polyline points="1 20 1 14 7 14"></polyline>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                        </svg>
+                        Refresh
+                    </button>
+                    <button onclick="showCreatePolicyForm()" class="btn btn-primary btn-sm">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        New Policy
+                    </button>
+                </div>
             </div>
             
             <div id="policiesList" class="policies-list"></div>
@@ -235,7 +344,8 @@
                     <div class="modal-header">
                         <h3>Create New Policy</h3>
                         <button class="close-btn" onclick="closeModal()">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
                                 <line x1="18" y1="6" x2="6" y2="18"></line>
                                 <line x1="6" y1="6" x2="18" y2="18"></line>
                             </svg>
@@ -292,20 +402,21 @@
 
         <!-- Alerts Tab -->
         <div id="alerts" class="tab-content">
-            <div class="content-header">
-                <h2>Security Alerts</h2>
-                <p class="subtitle">Monitor and manage security alerts</p>
-            </div>
-            
-            <div class="action-bar">
-                <button onclick="loadAlerts()" class="btn btn-secondary">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="23 4 23 10 17 10"></polyline>
-                        <polyline points="1 20 1 14 7 14"></polyline>
-                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-                    </svg>
-                    Refresh
-                </button>
+            <div class="content-header alert-header">
+                <div class="header-title-group">
+                    <h2 class="alert-title">Security Alerts</h2>
+                    <p class="subtitle alert-subtitle">Monitor and manage security alerts</p>
+                </div>
+                <div class="action-bar alert-actions">
+                    <button onclick="loadAlerts()" class="btn btn-ghost btn-sm">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <polyline points="1 20 1 14 7 14"></polyline>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                        </svg>
+                        Refresh
+                    </button>
+                </div>
             </div>
             
             <div id="alertsList" class="alerts-list"></div>
@@ -318,7 +429,7 @@
                 <p class="subtitle">System status, email monitoring, and activity reports</p>
             </div>
             
-            <div class="action-bar">
+            <div class="action-bar admin-only">
                 <button onclick="loadMonitoringData()" class="btn btn-secondary">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="23 4 23 10 17 10"></polyline>
@@ -329,30 +440,300 @@
                 </button>
             </div>
             
-            <!-- Email Monitoring Section -->
-            <div class="monitoring-section">
+            <!-- Email Monitoring Section (Admin only) -->
+            <div class="monitoring-section admin-only">
                 <div class="section-header">
                     <h3>
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z">
+                            </path>
                             <polyline points="22,6 12,13 2,6"></polyline>
                         </svg>
                         Email Monitoring & Data Leakage Prevention
                     </h3>
-                    <button onclick="showEmailTestForm()" class="btn btn-primary btn-small">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="12" y1="5" x2="12" y2="19"></line>
-                            <line x1="5" y1="12" x2="19" y2="12"></line>
-                        </svg>
-                        Test Email
-                    </button>
                 </div>
                 
                 <div id="emailStats" class="stats-grid"></div>
                 <div id="emailLogs" class="email-logs-container"></div>
             </div>
             
-            <div id="monitoringData" class="monitoring-data"></div>
+            <div id="monitoringData" class="monitoring-data admin-only"></div>
+        </div>
+
+        <!-- Login Modal -->
+        <div id="loginModal" class="modal-overlay" data-testid="login-modal" style="display: none;">
+            <div class="modal-content glass-card">
+                <button class="close-btn" onclick="closeLoginModal()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+                <div class="modal-body-content">
+                    <div class="modal-left-deco">
+                        <div class="deco-circle"></div>
+                        <div class="deco-icon">
+                            <svg width="60" height="60" viewBox="0 0 24 24" fill="none" class="animate-float">
+                                <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="white" stroke-width="2"
+                                    stroke-linecap="round" stroke-linejoin="round" />
+                                <path d="M2 17L12 22L22 17" stroke="white" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round" />
+                                <path d="M2 12L12 17L22 12" stroke="white" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round" />
+                            </svg>
+                        </div>
+                        <h3>Welcome Back</h3>
+                        <p>Secure access to your data protection dashboard.</p>
+                    </div>
+                    <div class="modal-form-section">
+                        <div class="modal-header">
+                            <h3>Login</h3>
+                            <p>Enter your credentials to continue</p>
+                        </div>
+                        <form id="loginForm" onsubmit="handleLogin(event)">
+                            <div class="form-group floating-label">
+                                <input type="text" id="loginUsername" required placeholder=" " class="form-input" data-testid="login-username-input">
+                                <label for="loginUsername">Username or Email</label>
+                                <div class="input-icon">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                        <circle cx="12" cy="7" r="4"></circle>
+                                    </svg>
+                                </div>
+                            </div>
+                            <div class="form-group floating-label">
+                                <input type="password" id="loginPassword" required placeholder=" " class="form-input" data-testid="login-password-input">
+                                <label for="loginPassword">Password</label>
+                                <div class="input-icon">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                                    </svg>
+                                </div>
+                            </div>
+                            <div class="modal-actions">
+                                <button type="submit" class="btn btn-primary btn-block">
+                                    <span>Sign In</span>
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                                        <polyline points="10 17 15 12 10 7"></polyline>
+                                        <line x1="15" y1="12" x2="3" y2="12"></line>
+                                    </svg>
+                                </button>
+                                <button type="button" onclick="closeLoginModal(); showRegisterModal()"
+                                    class="btn btn-text">
+                                    Don't have an account? <span>Register now</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Register Modal -->
+        <div id="registerModal" class="modal-overlay" data-testid="register-modal" style="display: none;">
+            <div class="modal-content glass-card modal-large">
+                <button class="close-btn" onclick="closeRegisterModal()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+                <div class="modal-body-content">
+                    <div class="modal-left-deco deco-register">
+                        <div class="deco-circle"></div>
+                        <div class="deco-icon">
+                            <svg width="60" height="60" viewBox="0 0 24 24" fill="none" class="animate-pulse">
+                                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="8.5" cy="7" r="4"></circle>
+                                <line x1="20" y1="8" x2="20" y2="14"></line>
+                                <line x1="23" y1="11" x2="17" y2="11"></line>
+                            </svg>
+                        </div>
+                        <h3>Join Us</h3>
+                        <p>Create an account to start protecting your sensitive data.</p>
+                    </div>
+                    <div class="modal-form-section">
+                        <div class="modal-header">
+                            <h3>Create Account</h3>
+                            <p>Fill in your details to register</p>
+                        </div>
+                        <form id="registerForm" onsubmit="handleRegister(event)">
+                            <div class="form-group floating-label">
+                                <input type="text" id="registerUsername" required minlength="3" placeholder=" "
+                                    class="form-input">
+                                <label for="registerUsername">Username</label>
+                                <div class="input-icon">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                        <circle cx="12" cy="7" r="4"></circle>
+                                    </svg>
+                                </div>
+                            </div>
+                            <div class="form-group floating-label">
+                                <input type="email" id="registerEmail" required placeholder=" " class="form-input" data-testid="register-email-input">
+                                <label for="registerEmail">Email Address</label>
+                                <div class="input-icon">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <path
+                                            d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z">
+                                        </path>
+                                        <polyline points="22,6 12,13 2,6"></polyline>
+                                    </svg>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group floating-label">
+                                    <input type="password" id="registerPassword" required minlength="6" placeholder=" "
+                                        class="form-input">
+                                    <label for="registerPassword">Password</label>
+                                    <div class="input-icon">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <div class="form-group floating-label">
+                                    <input type="password" id="registerPasswordConfirm" required placeholder=" "
+                                        class="form-input">
+                                    <label for="registerPasswordConfirm">Confirm Password</label>
+                                    <div class="input-icon">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="alert-banner alert-info compact">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                </svg>
+                                <span>Approval required after registration.</span>
+                            </div>
+                            <div class="modal-actions">
+                                <button type="submit" class="btn btn-primary btn-block">
+                                    <span>Create Account</span>
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                                        <polyline points="12 5 19 12 12 19"></polyline>
+                                    </svg>
+                                </button>
+                                <button type="button" onclick="closeRegisterModal(); showLoginModal()"
+                                    class="btn btn-text">
+                                    Already have an account? <span>Sign In</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test Email Tab -->
+        <div id="testEmail" class="tab-content" data-testid="test-email-tab-content">
+            <div class="content-header">
+                <h2>Test Email Monitoring</h2>
+                <p class="subtitle">Test email monitoring and sensitive data detection</p>
+            </div>
+            <div class="analysis-container">
+                <div class="form-card">
+                    <form id="emailTestForm" onsubmit="testEmail(event)">
+                        <div class="form-group">
+                            <label for="emailFrom">From Email</label>
+                            <input type="email" id="emailFrom" required placeholder="sender@example.com"
+                                value="" data-testid="email-from-input" disabled readonly>
+                        </div>
+                        <div class="form-group">
+                            <label for="emailTo">To Email(s) - Comma separated</label>
+                            <input type="text" id="emailTo" required
+                                placeholder="recipient1@example.com, recipient2@example.com" value="external@example.com" data-testid="email-to-input">
+                        </div>
+                        <div class="form-group">
+                            <label for="emailSubject">Subject</label>
+                            <input type="text" id="emailSubject" required placeholder="Email subject"
+                                value="Customer Data Request" data-testid="email-subject-input">
+                        </div>
+                        <div class="form-group">
+                            <label for="emailBody">Email Body</label>
+                            <textarea id="emailBody" rows="8" required
+                                placeholder="Enter email content with sensitive data like phone numbers, emails, etc..." data-testid="email-body-input">Dear Customer,
+
+Please find your information below:
+Phone: 123-456-7890
+Email: customer@example.com
+Address: 123 Main St, City, State 12345
+
+Best regards,
+Employee</textarea>
+                        </div>
+                        <div class="modal-actions">
+                            <button type="button" onclick="resetEmailForm()" class="btn btn-secondary">Reset</button>
+                            <button type="submit" class="btn btn-primary" data-testid="email-test-submit-btn">Analyze Email</button>
+                        </div>
+                    </form>
+                    <div id="emailTestResult" data-testid="email-test-result"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Users Management Tab (Admin only) -->
+        <div id="users" class="tab-content" data-testid="users-tab-content">
+            <div class="content-header">
+                <h2>User Management</h2>
+                <p class="subtitle">Manage users and approve registration requests</p>
+            </div>
+
+            <div class="action-bar">
+                <button onclick="loadUsers()" class="btn btn-secondary">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <polyline points="1 20 1 14 7 14"></polyline>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
+                    Refresh
+                </button>
+                <button onclick="loadPendingUsers()" class="btn btn-primary">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                        <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                    </svg>
+                    Pending Requests
+                    <span id="pendingCount" class="badge badge-warning"
+                        style="margin-left: 8px; display: none;">0</span>
+                </button>
+            </div>
+
+            <!-- Sub-tabs for Users -->
+            <div class="sub-tabs-container">
+                <button class="sub-tab-btn active" onclick="switchUsersView('all', this)">
+                    <span>All Users</span>
+                </button>
+                <button class="sub-tab-btn" onclick="switchUsersView('pending', this)">
+                    <span>Pending Approval</span>
+                    <span id="pendingTabCount" class="badge badge-warning"
+                        style="margin-left: 8px; display: none;">0</span>
+                </button>
+                <button class="sub-tab-btn" onclick="switchUsersView('active', this)">
+                    <span>Active Users</span>
+                </button>
+            </div>
+
+            <div id="usersList" class="users-list"></div>
         </div>
         
         <!-- Email Test Modal -->
@@ -365,19 +746,23 @@
                 <form id="emailTestForm" onsubmit="testEmail(event)">
                     <div class="form-group">
                         <label for="emailFrom">From Email</label>
-                        <input type="email" id="emailFrom" required placeholder="sender@example.com" value="employee@company.com">
+                        <input type="email" id="emailFrom" required placeholder="sender@example.com"
+                            value="employee@company.com">
                     </div>
                     <div class="form-group">
                         <label for="emailTo">To Email(s) - Comma separated</label>
-                        <input type="text" id="emailTo" required placeholder="recipient1@example.com, recipient2@example.com" value="external@example.com">
+                        <input type="text" id="emailTo" required
+                            placeholder="recipient1@example.com, recipient2@example.com" value="external@example.com" data-testid="email-to-input">
                     </div>
                     <div class="form-group">
                         <label for="emailSubject">Subject</label>
-                        <input type="text" id="emailSubject" required placeholder="Email subject" value="Customer Data Request">
+                        <input type="text" id="emailSubject" required placeholder="Email subject"
+                            value="Customer Data Request" data-testid="email-subject-input">
                     </div>
                     <div class="form-group">
                         <label for="emailBody">Email Body</label>
-                        <textarea id="emailBody" rows="8" required placeholder="Enter email content with sensitive data like phone numbers, emails, etc...">Dear Customer,
+                        <textarea id="emailBody" rows="8" required
+                            placeholder="Enter email content with sensitive data like phone numbers, emails, etc..." data-testid="email-body-input">Dear Customer,
 
 Please find your information below:
 Phone: 123-456-7890
@@ -389,7 +774,7 @@ Employee</textarea>
                     </div>
                     <div class="modal-actions">
                         <button type="button" onclick="closeEmailModal()" class="btn btn-secondary">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Analyze Email</button>
+                        <button type="submit" class="btn btn-primary" data-testid="email-test-submit-btn">Analyze Email</button>
                     </div>
                 </form>
             </div>
@@ -489,10 +874,10 @@ Employee</textarea>
         window.analyzeText = analyzeText;
         
         // Add event listener
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             const analyzeBtn = document.getElementById('analyzeBtn');
             if (analyzeBtn) {
-                analyzeBtn.addEventListener('click', function(e) {
+                analyzeBtn.addEventListener('click', function (e) {
                     e.preventDefault();
                     analyzeText();
                 });
@@ -500,4 +885,5 @@ Employee</textarea>
         });
     </script>
 </body>
+
 </html>

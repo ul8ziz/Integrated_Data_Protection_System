@@ -68,7 +68,9 @@ class MyDLPService:
             
         except requests.exceptions.ConnectionError as e:
             if self.is_localhost:
-                logger.warning(f"MyDLP not running on localhost. Start MyDLP service or set MYDLP_ENABLED=false")
+                # Use debug level to reduce log noise when MyDLP is not installed
+                # This is expected in development/simulation mode
+                logger.debug(f"MyDLP not running on localhost (simulation mode). To use real MyDLP, start the service or set MYDLP_ENABLED=false")
             else:
                 logger.error(f"Error connecting to MyDLP: {e}")
             return None
@@ -91,7 +93,7 @@ class MyDLPService:
             True if blocked successfully, False otherwise
         """
         if not self.enabled:
-            logger.info("MyDLP disabled, simulating block")
+            logger.debug("MyDLP disabled, simulating block (returning True)")
             return True
         
         try:

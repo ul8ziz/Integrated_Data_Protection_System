@@ -85,15 +85,21 @@ if (-not (Test-Path $requirementsFile)) {
     }
 }
 
-# Check if python-multipart is installed (required for file upload)
+# Check and install critical packages (required for authentication and file upload)
 Write-Host ""
-Write-Host "Checking for python-multipart..." -ForegroundColor Yellow
+Write-Host "Checking for critical packages..." -ForegroundColor Yellow
 $multipartCheck = & $pythonCmd -c "import multipart; print('installed')" 2>$null
 if (-not $multipartCheck) {
     Write-Host "Installing python-multipart (required for file upload)..." -ForegroundColor Cyan
     & $pythonCmd -m pip install python-multipart --quiet
     Write-Host "✅ python-multipart installed!" -ForegroundColor Green
 }
+
+# Ensure authentication packages are installed
+Write-Host "Ensuring authentication packages are installed..." -ForegroundColor Cyan
+& $pythonCmd -m pip install python-jose[cryptography] --quiet
+& $pythonCmd -m pip install passlib[bcrypt] --quiet
+& $pythonCmd -m pip install email-validator --quiet
 
 # Change to backend directory
 Set-Location $backendPath
