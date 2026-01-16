@@ -21,7 +21,17 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     SECRET_KEY: str = os.getenv("SECRET_KEY", "change-me-in-production")
     
-    # Database
+    # Database - MongoDB
+    MONGODB_URL: str = os.getenv(
+        "MONGODB_URL",
+        "mongodb://localhost:27017"
+    )
+    MONGODB_DB_NAME: str = os.getenv(
+        "MONGODB_DB_NAME",
+        "Secure_db"
+    )
+    
+    # Database - SQL (Legacy - للتوافق مع الكود القديم)
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
         "postgresql://user:password@localhost:5432/Secure_db"

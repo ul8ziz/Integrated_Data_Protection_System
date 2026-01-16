@@ -4,7 +4,10 @@ Schemas for user management and authentication
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
 from datetime import datetime
-from app.models.users import UserRole, UserStatus
+try:
+    from app.models_mongo.users import UserRole, UserStatus
+except ImportError:
+    from app.models.users import UserRole, UserStatus
 
 
 class UserBase(BaseModel):
@@ -35,14 +38,14 @@ class UserUpdate(BaseModel):
 
 class UserResponse(UserBase):
     """Schema for user response"""
-    id: int
+    id: str  # MongoDB uses ObjectId (string)
     role: UserRole
     status: UserStatus
     is_active: bool
     created_at: datetime
     approved_at: Optional[datetime] = None
     last_login: Optional[datetime] = None
-    approved_by: Optional[int] = None
+    approved_by: Optional[str] = None  # MongoDB uses ObjectId (string)
     rejection_reason: Optional[str] = None
     
     class Config:
@@ -51,7 +54,7 @@ class UserResponse(UserBase):
 
 class UserDetailResponse(UserResponse):
     """Detailed user response (for admins)"""
-    approved_by: Optional[int] = None
+    approved_by: Optional[str] = None  # MongoDB uses ObjectId (string)
     rejection_reason: Optional[str] = None
 
 

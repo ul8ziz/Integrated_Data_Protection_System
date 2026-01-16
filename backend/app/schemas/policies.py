@@ -39,7 +39,7 @@ class PolicyUpdate(BaseModel):
 
 class PolicyResponse(BaseModel):
     """Schema for policy response"""
-    id: int
+    id: str  # MongoDB uses ObjectId (string)
     name: str
     description: Optional[str]
     entity_types: List[str]

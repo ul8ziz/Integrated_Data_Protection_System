@@ -1,11 +1,10 @@
 """
-Policy service for managing data protection policies
+Policy service for managing data protection policies - MongoDB version
 """
-from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
-from app.models.policies import Policy
-from app.models.alerts import Alert, AlertSeverity, AlertStatus
-from app.models.logs import Log, DetectedEntity
+from app.models_mongo.policies import Policy
+from app.models_mongo.alerts import Alert, AlertSeverity, AlertStatus
+from app.models_mongo.logs import Log, DetectedEntity
 from app.services.presidio_service import PresidioService
 from app.services.mydlp_service import MyDLPService
 from app.services.encryption_service import EncryptionService
@@ -23,25 +22,21 @@ class PolicyService:
         self.mydlp = MyDLPService()
         self.encryption = EncryptionService()
     
-    def get_active_policies(self, db: Session) -> List[Policy]:
+    async def get_active_policies(self) -> List[Policy]:
         """
         Get all active policies
         
-        Args:
-            db: Database session
-            
         Returns:
             List of active policies
         """
-        return db.query(Policy).filter(Policy.enabled == True).all()
+        return await Policy.find({"enabled": True}).to_list()
     
-    def apply_policy(self, db: Session, text: str, source_ip: str = None, 
+    async def apply_policy(self, text: str, source_ip: str = None, 
                     source_user: str = None, source_device: str = None) -> Dict[str, Any]:
         """
         Apply policies to text and take appropriate actions
         
         Args:
-            db: Database session
             text: Text to analyze
             source_ip: Source IP address
             source_user: Source user
@@ -53,8 +48,7 @@ class PolicyService:
         # Analyze text with Presidio
         detected_entities = self.presidio.analyze(text)
         
-        return self.apply_policy_with_entities(
-            db=db,
+        return await self.apply_policy_with_entities(
             detected_entities=detected_entities,
             text=text,
             source_ip=source_ip,
@@ -62,14 +56,13 @@ class PolicyService:
             source_device=source_device
         )
     
-    def apply_policy_with_entities(self, db: Session, detected_entities: List[Dict], 
+    async def apply_policy_with_entities(self, detected_entities: List[Dict], 
                                    text: str = None, source_ip: str = None, 
                                    source_user: str = None, source_device: str = None) -> Dict[str, Any]:
         """
         Apply policies using pre-detected entities (avoids re-analysis)
         
         Args:
-            db: Database session
             detected_entities: Pre-detected entities from Presidio
             text: Original text (optional, for logging)
             source_ip: Source IP address
@@ -88,7 +81,7 @@ class PolicyService:
             }
         
         # Get active policies
-        policies = self.get_active_policies(db)
+        policies = await self.get_active_policies()
         
         # Check which policies apply
         actions_taken = []
@@ -127,8 +120,7 @@ class PolicyService:
                     logger.info(f"Email blocked by policy {policy.id} ({policy.name})")
                     
                     # Always create alert for blocked actions
-                    self._create_alert(
-                        db=db,
+                    await self._create_alert(
                         policy=policy,
                         detected_entities=relevant_entities,
                         source_ip=source_ip,
@@ -149,8 +141,7 @@ class PolicyService:
             elif policy.action == "alert":
                 # Create alert
                 if not alert_created:
-                    self._create_alert(
-                        db=db,
+                    await self._create_alert(
                         policy=policy,
                         detected_entities=relevant_entities,
                         source_ip=source_ip,
@@ -163,8 +154,7 @@ class PolicyService:
         
         # Log the event
         if text:
-            self._log_event(
-                db=db,
+            await self._log_event(
                 event_type="policy_applied",
                 message=f"Applied policies, detected {len(detected_entities)} entities",
                 source_ip=source_ip,
@@ -178,8 +168,7 @@ class PolicyService:
             
             # Store detected entities
             for entity in detected_entities:
-                self._store_detected_entity(
-                    db=db,
+                await self._store_detected_entity(
                     entity=entity,
                     source_text_hash=self.encryption.hash_text(text)
                 )
@@ -192,7 +181,7 @@ class PolicyService:
             "alert_created": alert_created
         }
     
-    def _create_alert(self, db: Session, policy: Policy, detected_entities: List[Dict],
+    async def _create_alert(self, policy: Policy, detected_entities: List[Dict],
                      source_ip: str = None, source_user: str = None, 
                      source_device: str = None, blocked: bool = False):
         """Create an alert for policy violation"""
@@ -215,20 +204,18 @@ class PolicyService:
                 source_user=source_user,
                 source_device=source_device,
                 detected_entities=detected_entities,
-                policy_id=policy.id,
+                policy_id=str(policy.id),
                 action_taken=policy.action,
                 blocked=blocked
             )
             
-            db.add(alert)
-            db.commit()
+            await alert.insert()
             logger.info(f"Alert created: {alert.id}")
             
         except Exception as e:
             logger.error(f"Error creating alert: {e}")
-            db.rollback()
     
-    def _log_event(self, db: Session, event_type: str, message: str,
+    async def _log_event(self, event_type: str, message: str,
                    source_ip: str = None, source_user: str = None, metadata: Dict = None):
         """Log an event"""
         try:
@@ -240,14 +227,12 @@ class PolicyService:
                 source_user=source_user,
                 extra_data=metadata or {}
             )
-            db.add(log)
-            db.commit()
+            await log.insert()
             
         except Exception as e:
             logger.error(f"Error logging event: {e}")
-            db.rollback()
     
-    def _store_detected_entity(self, db: Session, entity: Dict, source_text_hash: str):
+    async def _store_detected_entity(self, entity: Dict, source_text_hash: str):
         """Store detected entity in database"""
         try:
             # Encrypt the value before storing
@@ -263,10 +248,7 @@ class PolicyService:
                 action="encrypted"
             )
             
-            db.add(detected_entity)
-            db.commit()
+            await detected_entity.insert()
             
         except Exception as e:
             logger.error(f"Error storing detected entity: {e}")
-            db.rollback()
-

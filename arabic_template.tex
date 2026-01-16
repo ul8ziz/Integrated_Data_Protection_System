@@ -1,0 +1,34 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage{fontspec}
+\usepackage{xunicode}
+\usepackage{xltxtra}
+\setmainfont{Tahoma}
+\setsansfont{Tahoma}
+\setmonofont{Consolas}
+\XeTeXlinebreaklocale "ar"
+\XeTeXlinebreakskip = 0pt plus 1pt
+\newfontfamily\arabicfont{Tahoma}[Script=Arabic]
+\usepackage{geometry}
+\geometry{margin=2cm}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    pdftitle={تقرير فني شامل - نظام حماية البيانات المتكامل},
+    pdfauthor={Integrated Data Protection System}
+}
+\usepackage{tocloft}
+\renewcommand{\cftsecfont}{\bfseries}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[C]{تقرير فني شامل - نظام حماية البيانات المتكامل}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+
+\begin{document}
+$body$
+\end{document}

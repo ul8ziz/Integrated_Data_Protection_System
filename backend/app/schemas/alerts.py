@@ -8,7 +8,7 @@ from datetime import datetime
 
 class AlertResponse(BaseModel):
     """Schema for alert response"""
-    id: int
+    id: str  # MongoDB uses ObjectId (string)
     title: str
     description: Optional[str]
     severity: str
@@ -17,7 +17,7 @@ class AlertResponse(BaseModel):
     source_user: Optional[str]
     source_device: Optional[str]
     detected_entities: Optional[List[Dict[str, Any]]]
-    policy_id: Optional[int]
+    policy_id: Optional[str]  # MongoDB uses ObjectId (string)
     action_taken: Optional[str]
     blocked: bool
     created_at: datetime

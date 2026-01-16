@@ -2,13 +2,11 @@
 API routes for monitoring and reports
 """
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
 from typing import Dict, Any
 from datetime import datetime, timedelta
-from app.database import get_db
-from app.models.logs import Log, DetectedEntity
-from app.models.alerts import Alert
-from app.models.policies import Policy
+from app.models_mongo.logs import Log, DetectedEntity
+from app.models_mongo.alerts import Alert
+from app.models_mongo.policies import Policy
 from app.services.mydlp_service import MyDLPService
 from app.services.email_monitoring_service import EmailMonitoringService
 from app.api.dependencies import get_current_admin, get_optional_user
@@ -80,7 +78,6 @@ async def get_system_status(
 @router.post("/traffic")
 async def monitor_traffic(
     traffic_data: Dict[str, Any],
-    db: Session = Depends(get_db),
     current_user = Depends(get_current_admin)  # Admin only
 ):
     """
@@ -98,7 +95,6 @@ async def monitor_traffic(
 @router.get("/reports/summary")
 async def get_summary_report(
     days: int = 7,
-    db: Session = Depends(get_db),
     current_user = Depends(get_current_admin)  # Admin only
 ):
     """
@@ -108,29 +104,26 @@ async def get_summary_report(
         start_date = datetime.now() - timedelta(days=days)
         
         # Count logs
-        total_logs = db.query(Log).filter(Log.created_at >= start_date).count()
+        total_logs = await Log.find({"created_at": {"$gte": start_date}}).count()
         
         # Count detected entities
-        total_entities = db.query(DetectedEntity).filter(
-            DetectedEntity.created_at >= start_date
-        ).count()
+        total_entities = await DetectedEntity.find({"created_at": {"$gte": start_date}}).count()
         
         # Count alerts
-        total_alerts = db.query(Alert).filter(Alert.created_at >= start_date).count()
-        blocked_count = db.query(Alert).filter(
-            Alert.created_at >= start_date,
-            Alert.blocked == True
-        ).count()
+        total_alerts = await Alert.find({"created_at": {"$gte": start_date}}).count()
+        blocked_count = await Alert.find({
+            "created_at": {"$gte": start_date},
+            "blocked": True
+        }).count()
         
         # Count policies
-        active_policies = db.query(Policy).filter(Policy.enabled == True).count()
+        active_policies = await Policy.find({"enabled": True}).count()
         
         # Entity type breakdown
-        entity_types = db.query(DetectedEntity.entity_type).filter(
-            DetectedEntity.created_at >= start_date
-        ).all()
+        entities = await DetectedEntity.find({"created_at": {"$gte": start_date}}).to_list()
         entity_type_counts = {}
-        for (entity_type,) in entity_types:
+        for entity in entities:
+            entity_type = entity.entity_type
             entity_type_counts[entity_type] = entity_type_counts.get(entity_type, 0) + 1
         
         return {
@@ -156,27 +149,28 @@ async def get_logs_report(
     event_type: str = None,
     level: str = None,
     limit: int = 100,
-    db: Session = Depends(get_db),
     current_user = Depends(get_current_admin)  # Admin only
 ):
     """
     Get logs report
     """
     try:
-        query = db.query(Log)
-        
+        query = {}
         if event_type:
-            query = query.filter(Log.event_type == event_type)
+            query["event_type"] = event_type
         if level:
-            query = query.filter(Log.level == level)
+            query["level"] = level
         
-        logs = query.order_by(Log.created_at.desc()).limit(limit).all()
+        if query:
+            logs = await Log.find(query).sort("-created_at").limit(limit).to_list()
+        else:
+            logs = await Log.find({}).sort("-created_at").limit(limit).to_list()
         
         return {
             "count": len(logs),
             "logs": [
                 {
-                    "id": log.id,
+                    "id": str(log.id),
                     "event_type": log.event_type,
                     "message": log.message,
                     "level": log.level,
@@ -196,8 +190,7 @@ async def get_logs_report(
 @router.post("/email")
 async def monitor_email(
     email_data: Dict[str, Any],
-    http_request: Request,
-    db: Session = Depends(get_db)
+    http_request: Request
 ):
     """
     Monitor and analyze email for sensitive data
@@ -218,9 +211,9 @@ async def monitor_email(
     }
     """
     # Optional: get current user if authenticated (not required, but preferred)
-    current_user = await get_optional_user(http_request, db)
+    current_user = await get_optional_user(http_request)
     try:
-        result = email_monitoring.analyze_email(db=db, email_data=email_data)
+        result = await email_monitoring.analyze_email(email_data=email_data)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error monitoring email: {str(e)}")
@@ -229,7 +222,6 @@ async def monitor_email(
 @router.get("/email/statistics")
 async def get_email_statistics(
     days: int = 7,
-    db: Session = Depends(get_db),
     current_user = Depends(get_current_admin)  # Admin only
 ):
     """
@@ -238,7 +230,7 @@ async def get_email_statistics(
     Returns statistics about emails analyzed, blocked, and detected entities.
     """
     try:
-        stats = email_monitoring.get_email_statistics(db=db, days=days)
+        stats = await email_monitoring.get_email_statistics(days=days)
         return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting email statistics: {str(e)}")
@@ -247,7 +239,6 @@ async def get_email_statistics(
 @router.get("/email/logs")
 async def get_email_logs(
     limit: int = 50,
-    db: Session = Depends(get_db),
     current_user = Depends(get_current_admin)  # Admin only
 ):
     """
@@ -256,15 +247,13 @@ async def get_email_logs(
     Returns recent email analysis logs.
     """
     try:
-        logs = db.query(Log).filter(
-            Log.event_type == "email_received"
-        ).order_by(Log.created_at.desc()).limit(limit).all()
+        logs = await Log.find({"event_type": "email_received"}).sort("-created_at").limit(limit).to_list()
         
         return {
             "count": len(logs),
             "logs": [
                 {
-                    "id": log.id,
+                    "id": str(log.id),
                     "message": log.message,
                     "level": log.level,
                     "source_ip": log.source_ip,

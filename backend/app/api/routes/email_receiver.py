@@ -2,9 +2,7 @@
 API routes for receiving real emails from email servers
 """
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
 from typing import Dict, Any, Optional
-from app.database import get_db
 from app.services.email_monitoring_service import EmailMonitoringService
 import logging
 import email
@@ -19,8 +17,7 @@ email_monitoring = EmailMonitoringService()
 
 @router.post("/receive")
 async def receive_email(
-    request: Request,
-    db: Session = Depends(get_db)
+    request: Request
 ):
     """
     Receive email from email server (SMTP webhook, IMAP, etc.)
@@ -73,7 +70,7 @@ async def receive_email(
         }
         
         # Analyze email
-        result = email_monitoring.analyze_email(db=db, email_data=email_data)
+        result = await email_monitoring.analyze_email(email_data=email_data)
         
         # Return result
         return {
@@ -91,8 +88,7 @@ async def receive_email(
 
 @router.post("/receive/raw")
 async def receive_raw_email(
-    request: Request,
-    db: Session = Depends(get_db)
+    request: Request
 ):
     """
     Receive raw email (RFC 2822 format) from email server
@@ -178,7 +174,7 @@ async def receive_raw_email(
         }
         
         # Analyze email
-        result = email_monitoring.analyze_email(db=db, email_data=email_data)
+        result = await email_monitoring.analyze_email(email_data=email_data)
         
         return {
             "received": True,

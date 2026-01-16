@@ -1,21 +1,18 @@
 """
-Dependencies for authentication and authorization
+Dependencies for authentication and authorization - MongoDB version
 """
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
 from typing import Optional
-from app.database import get_db
-from app.models.users import User, UserRole, UserStatus
+from app.models_mongo.users import User, UserRole, UserStatus
 from app.services.auth_service import decode_access_token
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
-def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
+async def get_current_user(
+    token: str = Depends(oauth2_scheme)
 ) -> User:
     """
     Get current authenticated user from JWT token
@@ -23,37 +20,56 @@ def get_current_user(
     Raises:
         HTTPException: If token is invalid or user not found
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
     
-    # Decode token
-    payload = decode_access_token(token)
-    if payload is None:
+    try:
+        # Decode token
+        payload = decode_access_token(token)
+        if payload is None:
+            logger.warning("Token decode failed - invalid token")
+            raise credentials_exception
+        
+        username: str = payload.get("sub")
+        if username is None:
+            logger.warning("Token payload missing 'sub' field")
+            raise credentials_exception
+        
+        logger.debug(f"Looking up user: {username}")
+        
+        # Get user from database
+        user = await User.find_one({"username": username})
+        if user is None:
+            logger.warning(f"User not found in database: {username}")
+            raise credentials_exception
+        
+        # Check if user can login
+        if not user.can_login():
+            logger.warning(f"User cannot login: {username}, status: {user.status.value}, is_active: {user.is_active}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is not approved or active. Please wait for admin approval."
+            )
+        
+        logger.debug(f"User authenticated successfully: {username}")
+        return user
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in get_current_user: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise credentials_exception
-    
-    username: str = payload.get("sub")
-    if username is None:
-        raise credentials_exception
-    
-    # Get user from database
-    user = db.query(User).filter(User.username == username).first()
-    if user is None:
-        raise credentials_exception
-    
-    # Check if user can login
-    if not user.can_login():
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is not approved or active. Please wait for admin approval."
-        )
-    
-    return user
 
 
-def get_current_active_user(
+async def get_current_active_user(
     current_user: User = Depends(get_current_user)
 ) -> User:
     """
@@ -70,7 +86,7 @@ def get_current_active_user(
     return current_user
 
 
-def get_current_admin(
+async def get_current_admin(
     current_user: User = Depends(get_current_active_user)
 ) -> User:
     """
@@ -88,8 +104,7 @@ def get_current_admin(
 
 
 async def get_optional_user(
-    request: Request,
-    db: Session = Depends(get_db)
+    request: Request
 ) -> Optional[User]:
     """
     Get current user if authenticated, otherwise return None
@@ -109,11 +124,10 @@ async def get_optional_user(
             if username is None:
                 return None
             
-            user = db.query(User).filter(User.username == username).first()
+            user = await User.find_one({"username": username})
             return user if user and user.can_login() else None
     except Exception:
         # Silently fail if authentication is not available
         pass
     
     return None
-

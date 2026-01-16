@@ -1,14 +1,13 @@
 """
-Email monitoring service for detecting and blocking sensitive data in emails
+Email monitoring service for detecting and blocking sensitive data in emails - MongoDB version
 """
 import logging
 from typing import Dict, Any, List, Optional
-from sqlalchemy.orm import Session
 from app.services.presidio_service import PresidioService
 from app.services.policy_service import PolicyService
 from app.services.mydlp_service import MyDLPService
-from app.models.logs import Log, DetectedEntity
-from app.models.alerts import Alert, AlertSeverity, AlertStatus
+from app.models_mongo.logs import Log, DetectedEntity
+from app.models_mongo.alerts import Alert, AlertSeverity, AlertStatus
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -23,12 +22,11 @@ class EmailMonitoringService:
         self.policy_service = PolicyService()
         self.mydlp = MyDLPService()
     
-    def analyze_email(self, db: Session, email_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def analyze_email(self, email_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Analyze email content for sensitive data
         
         Args:
-            db: Database session
             email_data: Email information containing:
                 - from: Sender email address
                 - to: List of recipient email addresses
@@ -58,8 +56,7 @@ class EmailMonitoringService:
             detected_entities = self.presidio.analyze(full_text)
             
             # Log email received
-            self._log_email_event(
-                db=db,
+            await self._log_email_event(
                 event_type="email_received",
                 message=f"Email from {from_email} to {', '.join(to_emails)}",
                 source_ip=source_ip,
@@ -83,9 +80,7 @@ class EmailMonitoringService:
                 }
             
             # Apply policies with detected entities
-            # Pass detected_entities to avoid re-analyzing
-            policy_result = self.policy_service.apply_policy_with_entities(
-                db=db,
+            policy_result = await self.policy_service.apply_policy_with_entities(
                 detected_entities=detected_entities,
                 text=full_text,
                 source_ip=source_ip,
@@ -104,8 +99,7 @@ class EmailMonitoringService:
                 )
                 
                 # Create alert
-                self._create_email_alert(
-                    db=db,
+                await self._create_email_alert(
                     from_email=from_email,
                     to_emails=to_emails,
                     subject=subject,
@@ -117,8 +111,7 @@ class EmailMonitoringService:
             
             # Store detected entities
             for entity in detected_entities:
-                self._store_detected_entity(
-                    db=db,
+                await self._store_detected_entity(
                     entity=entity,
                     source_text_hash=self.policy_service.encryption.hash_text(full_text),
                     source_file=f"email_{from_email}_{datetime.now().timestamp()}"
@@ -142,7 +135,7 @@ class EmailMonitoringService:
                 "blocked": False
             }
     
-    def _log_email_event(self, db: Session, event_type: str, message: str,
+    async def _log_email_event(self, event_type: str, message: str,
                          source_ip: str = None, source_user: str = None,
                          email_data: Dict = None):
         """Log email event"""
@@ -155,13 +148,11 @@ class EmailMonitoringService:
                 source_user=source_user,
                 extra_data=email_data or {}
             )
-            db.add(log)
-            db.commit()
+            await log.insert()
         except Exception as e:
             logger.error(f"Error logging email event: {e}")
-            db.rollback()
     
-    def _create_email_alert(self, db: Session, from_email: str, to_emails: List[str],
+    async def _create_email_alert(self, from_email: str, to_emails: List[str],
                            subject: str, detected_entities: List[Dict],
                            source_ip: str = None, source_user: str = None,
                            blocked: bool = False):
@@ -185,18 +176,17 @@ class EmailMonitoringService:
                 source_ip=source_ip or "127.0.0.1",
                 source_user=source_user or from_email,
                 policy_id=None,
-                blocked=blocked
+                blocked=blocked,
+                detected_entities=detected_entities
             )
             
-            db.add(alert)
-            db.commit()
+            await alert.insert()
             logger.info(f"Email alert created: {alert.id}")
             
         except Exception as e:
             logger.error(f"Error creating email alert: {e}")
-            db.rollback()
     
-    def _store_detected_entity(self, db: Session, entity: Dict, source_text_hash: str,
+    async def _store_detected_entity(self, entity: Dict, source_text_hash: str,
                               source_file: str = None):
         """Store detected entity in database"""
         try:
@@ -214,19 +204,16 @@ class EmailMonitoringService:
                 action="detected"
             )
             
-            db.add(detected_entity)
-            db.commit()
+            await detected_entity.insert()
             
         except Exception as e:
             logger.error(f"Error storing detected entity: {e}")
-            db.rollback()
     
-    def get_email_statistics(self, db: Session, days: int = 7) -> Dict[str, Any]:
+    async def get_email_statistics(self, days: int = 7) -> Dict[str, Any]:
         """
         Get email monitoring statistics
         
         Args:
-            db: Database session
             days: Number of days to look back
             
         Returns:
@@ -237,23 +224,23 @@ class EmailMonitoringService:
             start_date = datetime.now() - timedelta(days=days)
             
             # Count email events
-            email_logs = db.query(Log).filter(
-                Log.event_type == "email_received",
-                Log.created_at >= start_date
-            ).count()
+            email_logs = await Log.find({
+                "event_type": "email_received",
+                "created_at": {"$gte": start_date}
+            }).count()
             
             # Count blocked emails
-            blocked_alerts = db.query(Alert).filter(
-                Alert.created_at >= start_date,
-                Alert.blocked == True,
-                Alert.title.like("Email blocked%")
-            ).count()
+            blocked_alerts = await Alert.find({
+                "created_at": {"$gte": start_date},
+                "blocked": True,
+                "title": {"$regex": "^Email blocked"}
+            }).count()
             
             # Count detected entities in emails
-            email_entities = db.query(DetectedEntity).filter(
-                DetectedEntity.created_at >= start_date,
-                DetectedEntity.source_file.like("email_%")
-            ).count()
+            email_entities = await DetectedEntity.find({
+                "created_at": {"$gte": start_date},
+                "source_file": {"$regex": "^email_"}
+            }).count()
             
             return {
                 "period_days": days,
@@ -272,4 +259,3 @@ class EmailMonitoringService:
                 "detected_entities": 0,
                 "allowed_emails": 0
             }
-

@@ -1,12 +1,10 @@
 """
-API routes for authentication
+API routes for authentication - MongoDB version
 """
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 from datetime import datetime
 import logging
-from app.database import get_db
-from app.models.users import User, UserRole, UserStatus
+from app.models_mongo.users import User, UserRole, UserStatus
 from app.schemas.users import (
     LoginRequest, TokenResponse, UserRegister, UserResponse
 )
@@ -22,8 +20,7 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(
-    user_data: UserRegister,
-    db: Session = Depends(get_db)
+    user_data: UserRegister
 ):
     """
     Register a new user account
@@ -32,7 +29,7 @@ async def register(
     admin approval before the user can login.
     """
     # Check if username already exists
-    existing_user = db.query(User).filter(User.username == user_data.username).first()
+    existing_user = await User.find_one({"username": user_data.username})
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -40,7 +37,7 @@ async def register(
         )
     
     # Check if email already exists
-    existing_email = db.query(User).filter(User.email == user_data.email).first()
+    existing_email = await User.find_one({"email": user_data.email})
     if existing_email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -58,17 +55,26 @@ async def register(
         is_active=False  # Will be activated after approval
     )
     
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    await new_user.insert()
     
-    return new_user
+    return UserResponse(
+        id=str(new_user.id),
+        username=new_user.username,
+        email=new_user.email,
+        role=new_user.role,
+        status=new_user.status,
+        is_active=new_user.is_active,
+        created_at=new_user.created_at,
+        approved_at=new_user.approved_at,
+        last_login=new_user.last_login,
+        approved_by=str(new_user.approved_by) if new_user.approved_by else None,
+        rejection_reason=new_user.rejection_reason
+    )
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
-    login_data: LoginRequest,
-    db: Session = Depends(get_db)
+    login_data: LoginRequest
 ):
     """
     Login and get access token
@@ -78,10 +84,9 @@ async def login(
     logger.info(f"Login attempt for username: {login_data.username}")
     try:
         # Find user by username or email
-        user = db.query(User).filter(
-            (User.username == login_data.username) | 
-            (User.email == login_data.username)
-        ).first()
+        user = await User.find_one({"username": login_data.username})
+        if not user:
+            user = await User.find_one({"email": login_data.username})
         
         logger.info(f"User found: {user is not None}")
         
@@ -138,7 +143,7 @@ async def login(
         
         # Update last login
         user.last_login = datetime.utcnow()
-        db.commit()
+        await user.save()
         
         # Create access token
         try:
@@ -155,7 +160,7 @@ async def login(
         # Create user response
         try:
             user_response = UserResponse(
-                id=user.id,
+                id=str(user.id) if hasattr(user.id, '__str__') else user.id,
                 username=user.username,
                 email=user.email,
                 role=user.role,
@@ -164,7 +169,7 @@ async def login(
                 created_at=user.created_at,
                 approved_at=user.approved_at,
                 last_login=user.last_login,
-                approved_by=user.approved_by,
+                approved_by=str(user.approved_by) if user.approved_by else None,
                 rejection_reason=user.rejection_reason
             )
         except Exception as e:
@@ -210,7 +215,19 @@ async def get_current_user_info(
     """
     Get current user information
     """
-    return current_user
+    return UserResponse(
+        id=str(current_user.id),
+        username=current_user.username,
+        email=current_user.email,
+        role=current_user.role,
+        status=current_user.status,
+        is_active=current_user.is_active,
+        created_at=current_user.created_at,
+        approved_at=current_user.approved_at,
+        last_login=current_user.last_login,
+        approved_by=str(current_user.approved_by) if current_user.approved_by else None,
+        rejection_reason=current_user.rejection_reason
+    )
 
 
 @router.post("/logout")
@@ -221,4 +238,3 @@ async def logout(
     Logout (client should discard token)
     """
     return {"message": "Logged out successfully"}
-

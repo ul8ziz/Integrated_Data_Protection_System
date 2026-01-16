@@ -3,9 +3,14 @@ fastapi>=0.104.1
 uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6
 
-# Database
-sqlalchemy>=2.0.23
-alembic>=1.12.1
+# Database - MongoDB
+motor>=3.3.2
+beanie>=1.23.6
+pymongo>=4.6.1
+
+# Database - SQL (Legacy - يمكن إزالته لاحقاً)
+# sqlalchemy>=2.0.23
+# alembic>=1.12.1
 # psycopg2-binary>=2.9.9
 
 # Presidio
@@ -40,3 +45,6 @@ pdfplumber>=0.10.3
 pytest>=7.4.3
 pytest-asyncio>=0.21.1
 
+# PDF Generation (for convert_to_pdf.py)
+markdown>=3.10
+xhtml2pdf>=0.2.17

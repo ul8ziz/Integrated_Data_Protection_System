@@ -14,6 +14,12 @@ pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 # JWT settings
 ALGORITHM = "HS256"
+# Token expiration time (in hours)
+# Default: 24 hours (1 day)
+# You can change this to:
+# - 1 hour for more security
+# - 168 hours (7 days) for convenience
+# - 720 hours (30 days) for long sessions
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
 

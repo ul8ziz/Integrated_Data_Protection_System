@@ -5,7 +5,151 @@ const API_BASE = window.location.origin || 'http://localhost:8000';
 const ALERT_SOUND = new Audio("data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU"); // Shortened placeholder, will use a real beep
 
 // Better beep sound (Base64)
-const BEEP_SOUND = "data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU"; 
+const BEEP_SOUND = "data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU";
+
+// ============================================================================
+// CRITICAL: Define approve/reject functions IMMEDIATELY at top level
+// These must be available before any HTML is rendered
+// ============================================================================
+window.approveUser = async function approveUser(userId) {
+    console.log('approveUser called with userId:', userId, typeof userId);
+    
+    if (!userId) {
+        console.error('No userId provided to approveUser');
+        if (typeof showNotification === 'function') {
+            showNotification('Error: User ID is missing', 'error');
+        }
+        return;
+    }
+    
+    if (!confirm('Are you sure you want to approve this user?')) {
+        console.log('User cancelled approval');
+        return;
+    }
+
+    try {
+        console.log('Approving user:', userId);
+        const headers = typeof getAuthHeaders === 'function' ? getAuthHeaders() : { 'Content-Type': 'application/json' };
+        console.log('Request headers:', { hasAuth: !!headers['Authorization'] });
+        
+        const response = await fetch(`/api/users/${userId}/approve`, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({})
+        });
+
+        console.log('Approve response status:', response.status);
+
+        if (!response.ok) {
+            if (response.status === 401 || response.status === 403) {
+                console.log('Unauthorized - logging out user');
+                if (typeof showNotification === 'function') {
+                    showNotification('Session expired. Please login again.', 'warning');
+                }
+                if (typeof logout === 'function') {
+                    logout();
+                }
+                return;
+            }
+            
+            let errorMessage = 'Failed to approve user';
+            try {
+                const error = await response.json();
+                errorMessage = error.detail || error.message || errorMessage;
+                console.error('Approve error:', error);
+            } catch (e) {
+                const errorText = await response.text();
+                console.error('Approve error (text):', errorText);
+                errorMessage = errorText || errorMessage;
+            }
+            throw new Error(errorMessage);
+        }
+
+        const data = await response.json();
+        console.log('User approved successfully:', data);
+        if (typeof showNotification === 'function') {
+            showNotification('User approved successfully!', 'success');
+        }
+        
+        // Reload pending users and all users
+        if (typeof loadPendingUsers === 'function') {
+            loadPendingUsers();
+        }
+        if (typeof loadUsers === 'function') {
+            loadUsers();
+        }
+
+    } catch (error) {
+        console.error('Error approving user:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Error approving user: ' + error.message, 'error');
+        }
+    }
+};
+
+window.rejectUser = async function rejectUser(userId) {
+    const reason = prompt('Enter rejection reason (optional):');
+    if (reason === null) return; // User cancelled
+
+    try {
+        console.log('Rejecting user:', userId, 'reason:', reason);
+        const headers = typeof getAuthHeaders === 'function' ? getAuthHeaders() : { 'Content-Type': 'application/json' };
+        console.log('Request headers:', { hasAuth: !!headers['Authorization'] });
+        
+        const response = await fetch(`/api/users/${userId}/reject`, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({ reason: reason || null })
+        });
+
+        console.log('Reject response status:', response.status);
+
+        if (!response.ok) {
+            if (response.status === 401 || response.status === 403) {
+                console.log('Unauthorized - logging out user');
+                if (typeof showNotification === 'function') {
+                    showNotification('Session expired. Please login again.', 'warning');
+                }
+                if (typeof logout === 'function') {
+                    logout();
+                }
+                return;
+            }
+            
+            let errorMessage = 'Failed to reject user';
+            try {
+                const error = await response.json();
+                errorMessage = error.detail || error.message || errorMessage;
+                console.error('Reject error:', error);
+            } catch (e) {
+                const errorText = await response.text();
+                console.error('Reject error (text):', errorText);
+                errorMessage = errorText || errorMessage;
+            }
+            throw new Error(errorMessage);
+        }
+
+        const data = await response.json();
+        console.log('User rejected successfully:', data);
+        if (typeof showNotification === 'function') {
+            showNotification('User rejected', 'warning');
+        }
+        
+        // Reload pending users and all users
+        if (typeof loadPendingUsers === 'function') {
+            loadPendingUsers();
+        }
+        if (typeof loadUsers === 'function') {
+            loadUsers();
+        }
+
+    } catch (error) {
+        console.error('Error rejecting user:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Error rejecting user: ' + error.message, 'error');
+        }
+    }
+}; 
 
 // ============================================================================
 // CRITICAL: Modal functions MUST be defined at top level for immediate availability
@@ -564,13 +708,8 @@ async function loadPolicies() {
             console.error('Policies API error:', response.status, errorText);
             
             if (response.status === 401 || response.status === 403) {
-                console.log('Unauthorized to load policies - clearing auth');
-                // Clear invalid auth
-                authToken = null;
-                currentUser = null;
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('currentUser');
-                updateAuthUI();
+                console.log('Unauthorized to load policies - logging out');
+                logout();
                 return;
             }
             throw new Error(`HTTP error! status: ${response.status}, message: ${errorText.substring(0, 100)}`);
@@ -645,8 +784,10 @@ function displayPolicies(policies) {
             ? descriptionText.substring(0, 50) + '...' 
             : descriptionText || '<span class="text-muted">No description</span>';
         
+        // Store policy data in data attribute (safer than inline onclick)
+        const policyDataAttr = encodeURIComponent(JSON.stringify(policy));
         html += `
-            <tr data-policy-id="${policy.id}" class="table-row-clickable" onclick="showPolicyDetails(${policy.id}, '${policy.name.replace(/'/g, "\\'")}', ${JSON.stringify(policy).replace(/"/g, '&quot;')})">
+            <tr data-policy-id="${policy.id}" class="table-row-clickable" data-policy-data="${policyDataAttr}" data-policy-name="${policy.name.replace(/"/g, '&quot;')}">
                 <td><strong>${policy.name}</strong></td>
                 <td><span title="${descriptionText || 'No description'}">${truncatedDescription}</span></td>
                 <td><div class="entity-types-cell">${entityTypes}</div></td>
@@ -664,6 +805,37 @@ function displayPolicies(policies) {
     `;
     
     list.innerHTML = html;
+    
+    // Add event delegation for policy row clicks
+    const table = list.querySelector('.policies-table');
+    if (table && !table.dataset.policyClickBound) {
+        table.dataset.policyClickBound = 'true';
+        table.addEventListener('click', (e) => {
+            const row = e.target.closest('tr[data-policy-id]');
+            if (!row) return;
+            
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const policyId = row.getAttribute('data-policy-id');
+            const policyName = row.getAttribute('data-policy-name');
+            const policyDataStr = row.getAttribute('data-policy-data');
+            
+            if (policyId && policyDataStr) {
+                try {
+                    const policyData = JSON.parse(decodeURIComponent(policyDataStr));
+                    console.log('Policy row clicked, showing details:', policyId);
+                    if (typeof window.showPolicyDetails === 'function') {
+                        window.showPolicyDetails(policyId, policyName || policyData.name || 'Policy', policyData);
+                    } else {
+                        console.error('showPolicyDetails function not found');
+                    }
+                } catch (error) {
+                    console.error('Error parsing policy data:', error);
+                }
+            }
+        });
+    }
 }
 
 function showCreatePolicyForm(resetForm = true) {
@@ -723,13 +895,19 @@ async function createPolicy(event) {
     };
     
     try {
+        const headers = getAuthHeaders();
+        console.log('Creating policy with headers:', { 
+            hasAuth: !!headers['Authorization'],
+            authLength: headers['Authorization']?.length || 0
+        });
+        
         const response = await fetch('/api/policies/', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: headers,
             body: JSON.stringify(formData)
         });
+        
+        console.log('Policy creation response status:', response.status);
         
         if (response.ok) {
             const data = await response.json();
@@ -738,6 +916,13 @@ async function createPolicy(event) {
             document.getElementById('policyForm').reset();
             loadPolicies();
         } else {
+            if (response.status === 401 || response.status === 403) {
+                // Unauthorized - logout user
+                console.log('Unauthorized - logging out user');
+                showNotification('Session expired. Please login again.', 'warning');
+                logout();
+                return;
+            }
             const error = await response.json();
             const errorMsg = error.detail || error.message || 'Failed to create policy';
             console.error('Policy creation error:', error);
@@ -764,6 +949,12 @@ async function deletePolicy(policyId) {
             showNotification('Policy deleted successfully', 'success');
             loadPolicies();
         } else {
+            if (response.status === 401 || response.status === 403) {
+                console.log('Unauthorized - logging out user');
+                showNotification('Session expired. Please login again.', 'warning');
+                logout();
+                return;
+            }
             const error = await response.json();
             const errorMsg = error.detail || error.message || 'Failed to delete policy';
             showNotification('Error: ' + errorMsg, 'error');
@@ -931,6 +1122,12 @@ async function updatePolicy(event) {
             resetPolicyForm();
             loadPolicies();
         } else {
+            if (response.status === 401 || response.status === 403) {
+                console.log('Unauthorized - logging out user');
+                showNotification('Session expired. Please login again.', 'warning');
+                logout();
+                return;
+            }
             const error = await response.json();
             const errorMsg = error.detail || error.message || 'Failed to update policy';
             console.error('Policy update error:', error);
@@ -974,7 +1171,8 @@ async function loadAlerts() {
         });
         if (!response.ok) {
             if (response.status === 401 || response.status === 403) {
-                console.log('Unauthorized to load alerts');
+                console.log('Unauthorized to load alerts - logging out');
+                logout();
                 return;
             }
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -1083,7 +1281,7 @@ function displayAlerts(alerts) {
         };
         
         html += `
-            <tr data-alert-id="${alert.id}" class="table-row-clickable" onclick="showAlertDetails(${alert.id}, ${JSON.stringify(alertData).replace(/"/g, '&quot;')})">
+            <tr data-alert-id="${alert.id}" class="table-row-clickable" data-alert-data="${encodeURIComponent(JSON.stringify(alertData))}">
                 <td><strong>${alert.title}</strong></td>
                 <td><span title="${descriptionText || 'No description'}">${truncatedDescription}</span></td>
                 <td><span class="badge ${severityBadge}">${alert.severity}</span></td>
@@ -1102,6 +1300,36 @@ function displayAlerts(alerts) {
     `;
     
     list.innerHTML = html;
+    
+    // Add event delegation for alert row clicks
+    const table = list.querySelector('table');
+    if (table && !table.dataset.alertClickBound) {
+        table.dataset.alertClickBound = 'true';
+        table.addEventListener('click', (e) => {
+            const row = e.target.closest('tr[data-alert-id]');
+            if (!row) return;
+            
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const alertId = row.getAttribute('data-alert-id');
+            const alertDataStr = row.getAttribute('data-alert-data');
+            
+            if (alertId && alertDataStr) {
+                try {
+                    const alertData = JSON.parse(decodeURIComponent(alertDataStr));
+                    console.log('Alert row clicked, showing details:', alertId);
+                    if (typeof window.showAlertDetails === 'function') {
+                        window.showAlertDetails(alertId, alertData);
+                    } else {
+                        console.error('showAlertDetails function not found');
+                    }
+                } catch (error) {
+                    console.error('Error parsing alert data:', error);
+                }
+            }
+        });
+    }
 }
 
 function showPolicyDetails(policyId, policyName, policyData) {
@@ -1593,7 +1821,8 @@ async function loadEmailLogs() {
         });
         if (!response.ok) {
             if (response.status === 401 || response.status === 403) {
-                console.log('Unauthorized to load email logs');
+                console.log('Unauthorized to load email logs - logging out');
+                logout();
                 return;
             }
             return;
@@ -1713,9 +1942,7 @@ async function testEmail(event) {
     try {
         const response = await fetch('/api/monitoring/email', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: getAuthHeaders(),
             body: JSON.stringify(emailData)
         });
         
@@ -1804,6 +2031,7 @@ let authToken = null;
 
 // Load user from localStorage on page load
 function loadStoredAuth() {
+    console.log('Loading stored auth from localStorage...');
     const storedToken = localStorage.getItem('authToken');
     const storedUser = localStorage.getItem('currentUser');
 
@@ -1811,16 +2039,26 @@ function loadStoredAuth() {
         try {
             authToken = storedToken;
             currentUser = JSON.parse(storedUser);
+            console.log('Auth loaded successfully:', { 
+                hasToken: !!authToken, 
+                username: currentUser?.username,
+                role: currentUser?.role 
+            });
             updateAuthUI();
         } catch (e) {
             console.error('Error loading stored auth:', e);
             // Clear invalid stored data
             localStorage.removeItem('authToken');
             localStorage.removeItem('currentUser');
+            authToken = null;
+            currentUser = null;
             updateAuthUI();
         }
     } else {
+        console.log('No stored auth found in localStorage');
         // No stored auth - show login overlay
+        authToken = null;
+        currentUser = null;
         updateAuthUI();
     }
 }
@@ -2048,6 +2286,16 @@ function getAuthHeaders() {
     };
     if (authToken) {
         headers['Authorization'] = `Bearer ${authToken}`;
+        console.log('Auth token included in headers');
+    } else {
+        console.warn('No auth token available! User may need to login again.');
+        // Try to reload from localStorage
+        const storedToken = localStorage.getItem('authToken');
+        if (storedToken) {
+            authToken = storedToken;
+            headers['Authorization'] = `Bearer ${authToken}`;
+            console.log('Auth token loaded from localStorage');
+        }
     }
     return headers;
 }
@@ -2474,6 +2722,44 @@ function displayUsers(users) {
     const container = document.getElementById('usersList');
     if (!container) return;
 
+    // Bind delegated handlers once (survives re-renders via innerHTML)
+    if (!container.dataset.userActionsBound) {
+        container.dataset.userActionsBound = 'true';
+        container.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-testid="approve-user-btn"], [data-testid="reject-user-btn"]');
+            if (!btn) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const userId = btn.getAttribute('data-user-id');
+            if (!userId) {
+                console.error('User action clicked but data-user-id is missing');
+                showNotification('Error: User ID is missing', 'error');
+                return;
+            }
+
+            if (btn.dataset.testid === 'approve-user-btn' || btn.getAttribute('data-testid') === 'approve-user-btn') {
+                console.log('Approve clicked (delegated), userId:', userId);
+                if (typeof window.approveUser === 'function') {
+                    window.approveUser(userId);
+                } else {
+                    console.error('window.approveUser is not a function');
+                    showNotification('Error: Approve function not available. Please refresh the page.', 'error');
+                }
+                return;
+            }
+
+            console.log('Reject clicked (delegated), userId:', userId);
+            if (typeof window.rejectUser === 'function') {
+                window.rejectUser(userId);
+            } else {
+                console.error('window.rejectUser is not a function');
+                showNotification('Error: Reject function not available. Please refresh the page.', 'error');
+            }
+        });
+    }
+
     if (users.length === 0) {
         container.innerHTML = '<div class="empty-state"><p>No users found</p></div>';
         return;
@@ -2521,13 +2807,13 @@ function displayUsers(users) {
                 </div>
                 ${user.status === 'pending' ? `
                     <div class="user-actions">
-                        <button class="btn btn-success btn-small" onclick="approveUser(${user.id})" data-testid="approve-user-btn">
+                        <button class="btn btn-success btn-small" type="button" data-testid="approve-user-btn" data-user-id="${user.id}">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polyline points="20 6 9 17 4 12"></polyline>
                             </svg>
                             Approve
                         </button>
-                        <button class="btn btn-danger btn-small" onclick="rejectUser(${user.id})" data-testid="reject-user-btn">
+                        <button class="btn btn-danger btn-small" type="button" data-testid="reject-user-btn" data-user-id="${user.id}">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <line x1="18" y1="6" x2="6" y2="18"></line>
                                 <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -2546,52 +2832,6 @@ function displayUsers(users) {
     });
 
     container.innerHTML = html;
-}
-
-async function approveUser(userId) {
-    if (!confirm('Are you sure you want to approve this user?')) return;
-
-    try {
-        const response = await fetch(`/api/users/${userId}/approve`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({})
-        });
-
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Failed to approve user');
-        }
-
-        showNotification('User approved successfully!', 'success');
-        loadPendingUsers();
-
-    } catch (error) {
-        showNotification('Error approving user: ' + error.message, 'error');
-    }
-}
-
-async function rejectUser(userId) {
-    const reason = prompt('Enter rejection reason (optional):');
-
-    try {
-        const response = await fetch(`/api/users/${userId}/reject`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ reason: reason || null })
-        });
-
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Failed to reject user');
-        }
-
-        showNotification('User rejected', 'warning');
-        loadPendingUsers();
-
-    } catch (error) {
-        showNotification('Error rejecting user: ' + error.message, 'error');
-    }
 }
 
 // Make functions globally available IMMEDIATELY
@@ -2723,8 +2963,7 @@ window.logout = logout;
 window.loadUsers = loadUsers;
 window.loadPendingUsers = loadPendingUsers;
 window.switchUsersView = switchUsersView;
-window.approveUser = approveUser;
-window.rejectUser = rejectUser;
+// approveUser and rejectUser are already defined in window scope above
 window.loadPolicies = loadPolicies;
 window.loadAlerts = loadAlerts;
 window.updateAlertStatus = updateAlertStatus;

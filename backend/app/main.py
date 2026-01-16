@@ -1,24 +1,37 @@
 """
 Main FastAPI application
 """
+import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.config import settings
-from app.database import init_db
+from app.database_mongo import init_mongodb, close_mongodb
 from app.api.routes import analysis, policies, alerts, monitoring
 from app.api.routes import email_receiver, auth, users
+from app.middleware.mongodb_check import MongoDBCheckMiddleware
 import logging
 import os
 
 # Configure logging
 os.makedirs("logs", exist_ok=True)
+
+# Ensure UTF-8 output on Windows consoles to avoid UnicodeEncodeError for Arabic logs
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    # Don't block startup if console can't be reconfigured
+    pass
+
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(settings.LOG_FILE),
-        logging.StreamHandler()
+        logging.FileHandler(settings.LOG_FILE, encoding="utf-8"),
+        logging.StreamHandler(stream=sys.stdout)
     ]
 )
 
@@ -41,6 +54,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# MongoDB check middleware (after CORS)
+app.add_middleware(MongoDBCheckMiddleware)
 
 # Include routers
 app.include_router(auth.router)
@@ -94,22 +110,23 @@ async def startup_event():
     """Initialize on startup"""
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     try:
-        # Initialize database
-        init_db()
-        logger.info("Database initialized")
+        # Initialize MongoDB
+        logger.info(f"Connecting to MongoDB at {settings.MONGODB_URL}...")
+        await init_mongodb()
+        logger.info("MongoDB database initialized successfully")
         
-        # Create default admin if doesn't exist
-        from app.database import SessionLocal
-        from app.models.users import User, UserRole, UserStatus
-        from app.services.auth_service import get_password_hash
-        from datetime import datetime
+        # Create default admin if doesn't exist (only if MongoDB is initialized)
+        from app.database_mongo import is_initialized
         
-        db = SessionLocal()
-        try:
-            admin = db.query(User).filter(User.role == UserRole.ADMIN).first()
-            if not admin:
-                logger.info("Creating default admin user...")
-                try:
+        if is_initialized():
+            from app.models_mongo.users import User, UserRole, UserStatus
+            from app.services.auth_service import get_password_hash
+            from datetime import datetime
+            
+            try:
+                admin = await User.find_one({"role": UserRole.ADMIN.value})
+                if not admin:
+                    logger.info("Creating default admin user...")
                     admin_password = "admin123"
                     hashed_password = get_password_hash(admin_password)
                     admin_user = User(
@@ -121,16 +138,47 @@ async def startup_event():
                         is_active=True,
                         approved_at=datetime.utcnow()
                     )
-                    db.add(admin_user)
-                    db.commit()
+                    await admin_user.insert()
                     logger.info("Default admin created: username=admin, password=admin123")
-                except Exception as e:
-                    logger.error(f"Error creating admin user: {e}")
-                    db.rollback()
-        finally:
-            db.close()
+                else:
+                    logger.info(f"Admin user already exists: {admin.username}")
+            except Exception as e:
+                logger.error(f"Error creating/checking admin user: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+            
+            # Create default policy if it doesn't exist
+            try:
+                from app.scripts.create_default_policy import create_default_policy
+                await create_default_policy()
+            except Exception as e:
+                logger.error(f"Error creating default policy: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+        else:
+            logger.warning("Skipping admin user creation - MongoDB not initialized")
     except Exception as e:
-        logger.error(f"Error initializing database: {e}")
+        logger.error(f"CRITICAL: Error initializing database: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        # Don't raise - allow app to start but log the error
+        logger.warning("=" * 60)
+        logger.warning("⚠️  WARNING: MongoDB is not connected!")
+        logger.warning("The application will start, but database operations will fail.")
+        logger.warning("")
+        logger.warning("To fix this:")
+        logger.warning("  1. Install MongoDB from https://www.mongodb.com/try/download/community")
+        logger.warning("  2. Start MongoDB service (Windows: Services -> MongoDB)")
+        logger.warning("  3. Or run: mongod --dbpath C:\\data\\db")
+        logger.warning("  4. Then restart this application")
+        logger.warning("=" * 60)
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    await close_mongodb()
+    logger.info("Application shutdown complete")
 
 
 @app.get("/", include_in_schema=False)
@@ -167,8 +215,19 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    from app.database_mongo import is_initialized, client
+    from datetime import datetime
+    
+    mongodb_status = "connected" if is_initialized() else "disconnected"
+    status = "healthy" if is_initialized() else "degraded"
+    
     return {
-        "status": "healthy",
-        "timestamp": __import__("datetime").datetime.now().isoformat()
+        "status": status,
+        "mongodb": {
+            "status": mongodb_status,
+            "initialized": is_initialized(),
+            "message": "MongoDB is connected and ready" if is_initialized() else "MongoDB is not connected. Please start MongoDB service."
+        },
+        "timestamp": datetime.now().isoformat()
     }
 

@@ -13,13 +13,13 @@ This guide explains how to set up MyDLP to run locally on the same machine for e
 
 ### على Windows:
 - Python 3.8+
-- SQLite (مضمن مع Python)
+- PostgreSQL 12+ (يجب تثبيته وتشغيله)
 - MyDLP CE (اختياري - النظام يعمل في وضع محاكي إذا لم يكن مثبتاً)
 
 ### على Linux:
 - Python 3.8+
+- PostgreSQL 12+ (يجب تثبيته وتشغيله)
 - Erlang/OTP 20+ (لـ MyDLP الفعلي)
-- MySQL/MariaDB أو SQLite
 - Build tools (gcc, make)
 
 ---
@@ -43,8 +43,8 @@ APP_VERSION=1.0.0
 DEBUG=true
 SECRET_KEY=change-me-to-secure-key-in-production-please
 
-# Database (Local - SQLite for easy setup)
-DATABASE_URL=sqlite:///./test.db
+# Database (PostgreSQL - required)
+DATABASE_URL=postgresql://user:password@localhost:5432/Secure_db
 
 # Encryption
 ENCRYPTION_KEY=change-me-to-32-byte-key-in-production-please
@@ -219,10 +219,33 @@ python test_local_mydlp.py
 ### خطأ في قاعدة البيانات / Database Error
 
 **الحل**: 
-```bash
-cd backend
-python init_db.py
-```
+1. تأكد من أن PostgreSQL يعمل:
+   ```bash
+   # Windows (Services)
+   # افتح Services وابحث عن postgresql
+   
+   # Linux
+   sudo systemctl status postgresql
+   ```
+
+2. تأكد من إنشاء قاعدة البيانات:
+   ```bash
+   psql -U postgres
+   CREATE DATABASE Secure_db;
+   CREATE USER Secure_user WITH PASSWORD 'Secure_password';
+   GRANT ALL PRIVILEGES ON DATABASE Secure_db TO Secure_user;
+   ```
+
+3. حدث ملف `.env`:
+   ```env
+   DATABASE_URL=postgresql://Secure_user:Secure_password@localhost:5432/Secure_db
+   ```
+
+4. شغّل تهيئة قاعدة البيانات:
+   ```bash
+   cd backend
+   python init_db.py
+   ```
 
 ---
 
@@ -242,8 +265,7 @@ python init_db.py
 
 ### الأداء / Performance
 
-- SQLite مناسب للاختبار والتطوير
-- للاستخدام في الإنتاج، استخدم PostgreSQL
+- PostgreSQL مطلوب للتشغيل (يجب تثبيته وتشغيله قبل بدء النظام)
 - Presidio قد يستغرق وقتاً أطول عند أول استخدام (تحميل النماذج)
 
 ---
