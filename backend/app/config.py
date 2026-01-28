@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     LOG_FILE: str = os.getenv("LOG_FILE", "logs/app.log")
     
+    # Timezone
+    TIMEZONE: str = os.getenv("TIMEZONE", "UTC")
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

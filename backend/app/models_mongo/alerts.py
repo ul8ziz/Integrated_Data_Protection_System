@@ -6,6 +6,7 @@ from pydantic import Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
+from app.utils.datetime_utils import get_current_time
 
 
 class AlertStatus(str, Enum):
@@ -47,7 +48,7 @@ class Alert(Document):
     blocked: bool = Field(default=False)
     
     # Metadata
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_current_time)
     resolved_at: Optional[datetime] = None
     resolved_by: Optional[str] = None
     

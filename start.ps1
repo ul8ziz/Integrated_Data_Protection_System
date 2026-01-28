@@ -219,6 +219,74 @@ if (-not $mongoRunning) {
 # Change to backend directory
 Set-Location $backendPath
 
+# Get local IP address (skip loopback and APIPA addresses)
+$localIP = $null
+try {
+    # Get all IPv4 addresses, exclude loopback (127.x.x.x) and APIPA (169.254.x.x)
+    $networkAdapters = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | 
+        Where-Object { 
+            $_.IPAddress -notlike "127.*" -and 
+            $_.IPAddress -notlike "169.254.*" -and
+            $_.IPAddress -notlike "0.0.0.0"
+        } |
+        Sort-Object -Property InterfaceIndex
+    
+    if ($networkAdapters) {
+        # Prefer IPs starting with 172, 192, or 10 (common private ranges)
+        $preferredIP = $networkAdapters | Where-Object { 
+            $_.IPAddress -like "172.*" -or 
+            $_.IPAddress -like "192.*" -or 
+            $_.IPAddress -like "10.*"
+        } | Select-Object -First 1
+        
+        if ($preferredIP) {
+            $localIP = $preferredIP.IPAddress
+        } else {
+            # Fallback to addresses that are not link-local and have valid prefix length
+            $preferredIP = $networkAdapters | Where-Object { $_.PrefixOrigin -eq "Dhcp" -or $_.PrefixOrigin -eq "Manual" } | Select-Object -First 1
+            if ($preferredIP) {
+                $localIP = $preferredIP.IPAddress
+            } else {
+                # Fallback to first non-loopback, non-APIPA address
+                $localIP = ($networkAdapters | Select-Object -First 1).IPAddress
+            }
+        }
+    }
+} catch {
+    # Fallback method using ipconfig
+    try {
+        $ipconfigOutput = ipconfig | Select-String -Pattern "IPv4.*:\s*(\d+\.\d+\.\d+\.\d+)" -AllMatches
+        if ($ipconfigOutput) {
+            $matches = $ipconfigOutput.Matches
+            # First try to find IPs starting with 172, 192, or 10
+            foreach ($match in $matches) {
+                $ip = $match.Groups[1].Value
+                if ($ip -notlike "127.*" -and $ip -notlike "169.254.*") {
+                    if ($ip -like "172.*" -or $ip -like "192.*" -or $ip -like "10.*") {
+                        $localIP = $ip
+                        break
+                    }
+                }
+            }
+            # If no preferred IP found, use first valid IP
+            if (-not $localIP) {
+                foreach ($match in $matches) {
+                    $ip = $match.Groups[1].Value
+                    if ($ip -notlike "127.*" -and $ip -notlike "169.254.*") {
+                        $localIP = $ip
+                        break
+                    }
+                }
+            }
+        }
+    } catch {
+        $localIP = "127.0.0.1"
+    }
+}
+if (-not $localIP) {
+    $localIP = "127.0.0.1"
+}
+
 # Force UTF-8 output (prevents UnicodeEncodeError for Arabic logs on Windows consoles)
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
@@ -227,12 +295,14 @@ Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Starting server..." -ForegroundColor Cyan
 Write-Host "Server will be available at:" -ForegroundColor Yellow
-Write-Host "  http://127.0.0.1:8000" -ForegroundColor White
-Write-Host "  http://localhost:8000" -ForegroundColor White
+Write-Host "  Local: http://127.0.0.1:8000" -ForegroundColor White
+Write-Host "  Network: http://$localIP:8000" -ForegroundColor Green
 Write-Host ""
 Write-Host "API Documentation:" -ForegroundColor Yellow
 Write-Host "  http://127.0.0.1:8000/docs" -ForegroundColor White
 Write-Host ""
+Write-Host "Note: Server is accessible from other devices on the network" -ForegroundColor Cyan
+Write-Host "Use the Network URL above to access from other devices" -ForegroundColor Cyan
 if (-not $mongoRunning) {
     Write-Host "⚠️  Note: MongoDB connection will be tested on startup" -ForegroundColor Yellow
 }
@@ -248,11 +318,12 @@ Start-Process "http://127.0.0.1:8000"
 
 # Start the server
 Write-Host "Starting uvicorn server..." -ForegroundColor Green
+Write-Host "Server listening on all interfaces (0.0.0.0:8000)" -ForegroundColor Cyan
 Write-Host "Press Ctrl+C to stop the server" -ForegroundColor Yellow
 Write-Host ""
 
 try {
-    & $pythonCmd -X utf8 -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+    & $pythonCmd -X utf8 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 } catch {
     Write-Host ""
     Write-Host "❌ Error: Server failed to start!" -ForegroundColor Red

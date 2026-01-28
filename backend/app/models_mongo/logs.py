@@ -5,6 +5,7 @@ from beanie import Document
 from pydantic import Field
 from typing import Optional, Dict, Any
 from datetime import datetime
+from app.utils.datetime_utils import get_current_time
 
 
 class Log(Document):
@@ -20,18 +21,29 @@ class Log(Document):
     source_user: Optional[str] = Field(None, max_length=100)
     user_agent: Optional[str] = Field(None, max_length=255)
     
+    # File information (for file analysis operations)
+    file_name: Optional[str] = Field(None, max_length=500)
+    file_size: Optional[int] = None
+    file_type: Optional[str] = Field(None, max_length=50)
+    
+    # Network information (for network operations)
+    network_destination: Optional[str] = Field(None, max_length=500)
+    network_protocol: Optional[str] = Field(None, max_length=50)
+    
     # Additional data
     extra_data: Optional[Dict[str, Any]] = None
     
     # Timestamp
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_current_time)
     
     class Settings:
         name = "logs"  # Collection name
         indexes = [
             "event_type",
             "level",
-            "created_at"
+            "created_at",
+            "source_user",
+            "file_name"
         ]
     
     def __repr__(self):
@@ -63,7 +75,7 @@ class DetectedEntity(Document):
     log_id: Optional[str] = None  # Log ID reference
     
     # Metadata
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_current_time)
     
     class Settings:
         name = "detected_entities"  # Collection name

@@ -1,0 +1,214 @@
+---
+alwaysApply: true
+description: "Secure DLP System rules (FastAPI + Presidio + MyDLP CE + RBAC + Audit + GDPR/HIPAA)"
+globs:
+  - "**/*.py"
+  - "backend/**"
+  - "**/*.sql"
+  - "**/*.md"
+  - "**/*.yml"
+  - "**/*.yaml"
+  - "frontend/**"
+  - "**/*.js"
+  - "**/*.html"
+  - "**/*.css"
+---
+
+# Secure — Integrated Data Protection System (Project Rules)
+
+You are the project AI assistant for **Secure - Integrated Data Protection System**.
+The system protects personal data in organizations by combining:
+- **Microsoft Presidio** for text/PII detection
+- **MyDLP CE** for monitoring/preventing data leakage
+- A complete **RBAC user management** system (Admin/User), registration approval, audit logs, and compliance support (GDPR/HIPAA).
+
+All outputs MUST be production-oriented, security-first, and consistent with the existing architecture.
+
+---
+
+## 1) Non-Negotiables (Hard Rules)
+- Security-first: DO NOT weaken authentication/authorization, validation, or logging for convenience.
+- Do NOT hardcode secrets, tokens, or credentials. Use environment variables + config layer.
+- All endpoints MUST enforce RBAC and ownership rules (Admin vs User).
+- Avoid “silent failures”: All errors must return structured responses and be logged.
+- Do NOT invent APIs/endpoints that conflict with the documented endpoints below.
+- Prefer minimal dependencies. Any new dependency must be justified.
+
+---
+
+## 2) Supported Stack (Must Follow)
+### Backend
+- FastAPI, SQLAlchemy, Pydantic
+- OAuth2 + JWT
+- Password hashing: bcrypt (via passlib[bcrypt])
+- DB: PostgreSQL (primary) or SQLite (test/dev only)
+
+### Frontend
+- HTML5 + CSS3 + Vanilla JavaScript (no framework unless explicitly requested)
+
+### AI/NLP
+- Microsoft Presidio for detection/extraction
+- MyDLP CE integration for monitoring workflows (simulate where needed)
+
+---
+
+## 3) Canonical API Endpoints (Do Not Deviate)
+### Authentication
+- POST `/api/auth/login`
+- POST `/api/auth/register`
+
+### Users (Admin)
+- GET  `/api/users/`
+- GET  `/api/users/pending`
+- POST `/api/users/{id}/approve`
+
+### Analysis
+- POST `/api/analyze/`       (text analysis)
+- POST `/api/analyze/file`   (file upload analysis)
+
+### Monitoring
+- POST `/api/monitoring/email`
+- GET  `/api/monitoring/status`
+
+If new endpoints are required, they MUST:
+- live under `/api/...`
+- have clear RBAC
+- be documented in README/API docs
+
+---
+
+## 4) Architecture & Directory Conventions
+Maintain separation of concerns:
+- **API layer**: routers, request/response models, dependencies (auth, RBAC)
+- **Service layer**: analysis services (Presidio), monitoring services (MyDLP), file processing
+- **Data layer**: SQLAlchemy models, repositories/CRUD
+- **Core**: config, logging, security utils, shared exceptions, constants
+
+When proposing changes:
+- Specify exact file paths (e.g., `backend/app/routers/analyze.py`)
+- Provide complete code snippets that compile
+- Avoid large refactors unless requested
+
+---
+
+## 5) Security Rules (Strict)
+### Authentication & Sessions
+- JWT MUST include: user_id, role, exp, iat (and optionally jti).
+- Enforce token expiration and reject invalid/expired tokens.
+- Use OAuth2PasswordBearer flow for login.
+
+### Password & Registration
+- Always hash passwords using bcrypt (passlib).
+- Registration MUST create users in a **pending approval** state (unless explicitly configured otherwise).
+- Admin approval endpoint must validate admin role and user state transitions.
+
+### Authorization (RBAC)
+- Admin: user management, policies, alerts, system monitoring
+- User: analyze text/file, view own history (if implemented)
+- Use dependency injection for role checks:
+  - `get_current_user`
+  - `require_admin`
+- Never rely on client-side role claims.
+
+### Input Validation
+- Validate all request payloads with Pydantic.
+- Reject unexpected fields where appropriate (extra=forbid if suitable).
+- Ensure file validation: type, size, and safe handling (no arbitrary code execution).
+
+### OWASP Basics
+- Prevent IDOR: verify resource ownership (user can only
+
+
+## Quality Assurance & Code Effectiveness (Enforced)
+
+### Mandatory Quality Gate (Before final output)
+- For any code change, the assistant MUST:
+  1) Identify potential compile/runtime issues and fix them proactively.
+  2) Review the change for correctness, security, and side effects.
+  3) Provide a short verification plan (how to validate the change works).
+  4) Provide minimal tests or manual test steps when automated tests are not present.
+- The assistant MUST NOT leave TODOs for critical flows (auth, RBAC, file scanning, logging).
+- The assistant MUST ensure all changes are consistent with existing project patterns and API contract.
+
+### Error Fixing Rules
+- When an error is reported:
+  - MUST pinpoint the root cause (not just symptoms).
+  - MUST propose the smallest safe fix first (minimal diff).
+  - MUST update related code to prevent recurrence (validation, error handling, logging).
+  - MUST include exact file paths and copy-paste-ready patches/snippets.
+
+### Code Review Checklist (Must Apply)
+- Authentication/Authorization:
+  - Ensure RBAC checks exist and cannot be bypassed (401/403 correct usage).
+  - Prevent IDOR by checking ownership where applicable.
+- Input Validation:
+  - Ensure Pydantic models validate inputs; reject dangerous or unexpected values.
+  - Validate file type/size; prevent path traversal and unsafe filenames.
+- Error Handling:
+  - Ensure try/catch at service boundaries; return structured API errors.
+  - Do not leak sensitive details in error responses.
+- Logging/Audit:
+  - Ensure security-relevant actions are auditable (login, register, approve, analyze, monitoring).
+  - Do not log secrets, passwords, raw tokens, or full sensitive payloads.
+- Performance:
+  - Avoid heavy work in request thread when possible; use efficient parsing and timeouts for file ops.
+- Maintainability:
+  - Keep code modular (router → service → data).
+  - Avoid duplicated logic; move shared parts to core/services or utilities.
+
+### Effectiveness Verification (Required)
+- For each implemented feature/fix, the assistant MUST include:
+  - Expected behavior (what success looks like)
+  - Failure cases covered
+  - How to reproduce and verify (API calls, sample payloads)
+  - If relevant: sample cURL commands or minimal frontend steps
+
+---
+
+## Professional UI/UX Design Rules (Frontend: HTML/CSS/JS)
+
+### UI Principles (Enforced)
+- The UI MUST look professional and enterprise-ready:
+  - Clean layout, consistent spacing, typography, and colors.
+  - Clear hierarchy: headings, sections, actions, and feedback.
+  - Accessible contrast and readable font sizes.
+- Use a consistent design system:
+  - 1 primary color + neutrals, consistent border radius, consistent shadow depth.
+  - Consistent button styles (primary/secondary/danger).
+- Provide immediate feedback:
+  - Loading states, success messages, error states.
+  - Disable submit buttons while requests are in-flight.
+- Forms MUST include:
+  - Inline validation messages
+  - Clear labels and helpful placeholders
+  - Proper input types (email/password/file)
+- Tables (Admin dashboards) MUST include:
+  - Sorting/search (if simple to implement)
+  - Clear status badges (pending/approved/disabled)
+  - Action buttons aligned and consistent
+
+### Frontend Security (Must Follow)
+- Do not render raw server messages without sanitization.
+- Do not expose sensitive information in UI or console logs.
+- Handle 401/403 globally:
+  - redirect to login
+  - show “session expired” message
+
+### UX Flows (Required)
+- Authentication:
+  - Login page: clean, minimal, strong focus on primary action.
+  - Register flow: show “pending approval” clearly after signup.
+- Analysis:
+  - Separate tabs/sections for Text Analysis and File Analysis.
+  - Show results in structured cards/table (entity type, confidence, location).
+  - Provide “copy results as JSON” button if feasible.
+- Admin Dashboard:
+  - Users: pending approvals clearly visible at top.
+  - Monitoring: status + recent events + severity badges.
+  - Audit log: filter by date/user/action.
+
+### Output Requirements (Frontend)
+- Any UI change must include:
+  - File paths edited (HTML/CSS/JS)
+  - Before/after notes (what improved)
+  - Manual verification steps in browser

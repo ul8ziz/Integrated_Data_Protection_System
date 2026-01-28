@@ -367,6 +367,37 @@ function showTab(tabName, element) {
             }
         });
     }
+    
+    // Load data when specific tabs are opened
+    if (tabName === 'users' && currentUser && currentUser.role === 'admin') {
+        // Load all users by default when opening users tab
+        setTimeout(() => {
+            if (typeof loadUsers === 'function') {
+                loadUsers(null, 1);
+            }
+        }, 100);
+    } else if (tabName === 'policies' && currentUser && currentUser.role === 'admin') {
+        // Load policies when opening policies tab
+        setTimeout(() => {
+            if (typeof loadPolicies === 'function') {
+                loadPolicies(1);
+            }
+        }, 100);
+    } else if (tabName === 'alerts' && currentUser && currentUser.role === 'admin') {
+        // Load alerts when opening alerts tab
+        setTimeout(() => {
+            if (typeof loadAlerts === 'function') {
+                loadAlerts(1);
+            }
+        }, 100);
+    } else if (tabName === 'monitoring' && currentUser && currentUser.role === 'admin') {
+        // Load monitoring data when opening monitoring tab
+        setTimeout(() => {
+            if (typeof loadMonitoringData === 'function') {
+                loadMonitoringData(1);
+            }
+        }, 100);
+    }
 }
 
 // Analysis Mode Switching
@@ -630,27 +661,69 @@ function displayAnalysisResult(result, fileName = null) {
         </div>`;
     }
     
+    // Check if policies were applied
+    const policiesMatched = result.policies_matched || false;
+    const appliedPolicies = result.applied_policies || [];
+    
     if (result.sensitive_data_detected) {
-        html += `<div class="alert-banner alert-danger">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-                <line x1="12" y1="9" x2="12" y2="13"></line>
-                <line x1="12" y1="17" x2="12.01" y2="17"></line>
-            </svg>
-            <span>Sensitive Data Detected!</span>
-        </div>`;
+        // Show message based on whether policies matched
+        if (policiesMatched && appliedPolicies.length > 0) {
+            html += `<div class="alert-banner alert-danger">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+                <span>Sensitive Data Detected - Policies Applied!</span>
+            </div>`;
+        } else {
+            html += `<div class="alert-banner alert-info">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                </svg>
+                <span>Sensitive Data Detected - No Matching Policies (No Action Taken)</span>
+            </div>`;
+        }
+        
+        // Show applied policies
+        if (appliedPolicies.length > 0) {
+            html += `<h4 style="margin-top: 24px; margin-bottom: 16px; color: var(--dark);">Applied Policies (${appliedPolicies.length})</h4>`;
+            html += `<div style="margin-bottom: 24px;">`;
+            appliedPolicies.forEach(policy => {
+                const actionBadge = policy.action === 'block' ? 'badge-danger' : policy.action === 'alert' ? 'badge-warning' : 'badge-info';
+                const severityBadge = policy.severity === 'critical' || policy.severity === 'high' ? 'badge-danger' : policy.severity === 'medium' ? 'badge-warning' : 'badge-info';
+                html += `
+                    <div style="padding: 16px; margin-bottom: 12px; background: var(--light); border-radius: 8px; border-left: 4px solid var(--primary);">
+                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+                            <strong style="font-size: 1.1rem; color: var(--dark);">${policy.name}</strong>
+                            <div>
+                                <span class="badge ${actionBadge}" style="margin-right: 8px;">${policy.action}</span>
+                                <span class="badge ${severityBadge}">${policy.severity}</span>
+                            </div>
+                        </div>
+                        <div style="margin-top: 8px; font-size: 0.9rem; color: var(--text-muted);">
+                            <div><strong>Matched Entities:</strong> ${policy.matched_entities.join(', ')} (${policy.matched_count} found)</div>
+                            <div style="margin-top: 4px;"><strong>Policy Entity Types:</strong> ${policy.entity_types.join(', ')}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            html += `</div>`;
+        }
         
         if (result.blocked) {
             html += `<div class="alert-banner alert-warning">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M18 6L6 18M6 6l12 12"></path>
                 </svg>
-                <span>Data Transfer Blocked</span>
+                <span>Data Transfer Blocked by Policy</span>
             </div>`;
         }
         
         if (result.alert_created) {
-            html += `<div class="badge badge-warning">Alert Created</div>`;
+            html += `<div class="badge badge-warning" style="margin-bottom: 16px;">Alert Created</div>`;
         }
         
         html += `<h4 style="margin-top: 24px; margin-bottom: 16px; color: var(--dark);">Detected Entities (${result.detected_entities.length})</h4>`;
@@ -665,7 +738,7 @@ function displayAnalysisResult(result, fileName = null) {
         });
         
         if (result.actions_taken && result.actions_taken.length > 0) {
-            html += `<div class="actions-taken"><strong>Actions Taken:</strong> `;
+            html += `<div class="actions-taken" style="margin-top: 16px;"><strong>Actions Taken:</strong> `;
             result.actions_taken.forEach(action => {
                 html += `<span class="action-tag">${action}</span>`;
             });
@@ -685,7 +758,23 @@ function displayAnalysisResult(result, fileName = null) {
 }
 
 // Policy functions
-async function loadPolicies() {
+function switchPoliciesView(view, btn) {
+    // Update active tab
+    document.querySelectorAll('.sub-tabs-container .sub-tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    
+    if (view === 'active') {
+        document.getElementById('policiesList').style.display = 'block';
+        document.getElementById('deletedPoliciesList').style.display = 'none';
+        loadPolicies();
+    } else if (view === 'deleted') {
+        document.getElementById('policiesList').style.display = 'none';
+        document.getElementById('deletedPoliciesList').style.display = 'block';
+        loadDeletedPolicies();
+    }
+}
+
+async function loadPolicies(page = 1) {
     try {
         // Only load if user is logged in and is admin
         if (!authToken || !currentUser || currentUser.role !== 'admin') {
@@ -693,11 +782,12 @@ async function loadPolicies() {
             return;
         }
         
-        console.log('Loading policies with auth token:', authToken ? 'present' : 'missing');
+        currentPoliciesPage = page;
+        console.log('Loading policies with auth token:', authToken ? 'present' : 'missing', 'page:', page);
         const headers = getAuthHeaders();
         console.log('Request headers:', headers);
         
-        const response = await fetch('/api/policies/', {
+        const response = await fetch(`/api/policies/?page=${page}&limit=${policiesPagination.limit}`, {
             headers: headers
         });
         
@@ -715,9 +805,29 @@ async function loadPolicies() {
             throw new Error(`HTTP error! status: ${response.status}, message: ${errorText.substring(0, 100)}`);
         }
         
-        const policies = await response.json();
+        const data = await response.json();
+        console.log('Policies API response:', data);
+        
+        // Handle both paginated and non-paginated responses
+        const policies = Array.isArray(data) ? data : (data.items || []);
+        
+        if (!Array.isArray(policies)) {
+            console.error('Policies is not an array:', typeof policies, policies);
+            throw new Error('Invalid policies data format');
+        }
+        
+        policiesPagination = {
+            total: data.total || policies.length,
+            total_pages: data.total_pages || 1,
+            limit: data.limit || policiesPagination.limit,
+            has_next: data.has_next !== undefined ? data.has_next : (currentPoliciesPage < (data.total_pages || 1)),
+            has_prev: data.has_prev !== undefined ? data.has_prev : (currentPoliciesPage > 1)
+        };
+        
         console.log('Policies loaded successfully:', policies.length, 'policies');
+        console.log('Policies pagination:', policiesPagination);
         displayPolicies(policies);
+        renderPagination('policies', currentPoliciesPage, policiesPagination, loadPolicies);
     } catch (error) {
         console.error('Error loading policies:', error);
         const policiesList = document.getElementById('policiesList');
@@ -746,6 +856,7 @@ function displayPolicies(policies) {
     }
     
     console.log('Rendering table for', policies.length, 'policies');
+    console.log('Current user:', currentUser);
     let html = `
         <div class="table-container">
             <table class="policies-table">
@@ -757,10 +868,18 @@ function displayPolicies(policies) {
                         <th>Action</th>
                         <th>Severity</th>
                         <th>Status</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
     `;
+    
+    // Ensure policies is an array before iterating
+    if (!Array.isArray(policies)) {
+        console.error('Policies is not an array in forEach:', typeof policies, policies);
+        list.innerHTML = '<div class="empty-state"><p>Error: Invalid policies data format</p></div>';
+        return;
+    }
     
     policies.forEach(policy => {
         const statusBadge = policy.enabled 
@@ -786,6 +905,21 @@ function displayPolicies(policies) {
         
         // Store policy data in data attribute (safer than inline onclick)
         const policyDataAttr = encodeURIComponent(JSON.stringify(policy));
+        
+        // Toggle button - Enable/Disable
+        const toggleButton = policy.enabled
+            ? `<button class="btn-icon btn-warning" onclick="event.stopPropagation(); togglePolicy('${policy.id}', false)" title="Disable Policy">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="6" y="4" width="4" height="16" rx="1"></rect>
+                    <rect x="14" y="4" width="4" height="16" rx="1"></rect>
+                </svg>
+            </button>`
+            : `<button class="btn-icon btn-success" onclick="event.stopPropagation(); togglePolicy('${policy.id}', true)" title="Enable Policy">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+            </button>`;
+        
         html += `
             <tr data-policy-id="${policy.id}" class="table-row-clickable" data-policy-data="${policyDataAttr}" data-policy-name="${policy.name.replace(/"/g, '&quot;')}">
                 <td><strong>${policy.name}</strong></td>
@@ -794,6 +928,23 @@ function displayPolicies(policies) {
                 <td>${actionBadge}</td>
                 <td>${severityBadge}</td>
                 <td>${statusBadge}</td>
+                <td>
+                    <div class="action-buttons" style="display: flex; gap: 4px; justify-content: flex-end;">
+                        ${toggleButton}
+                        <button class="btn-icon btn-update" onclick="event.stopPropagation(); editPolicy('${policy.id}')" title="Edit Policy">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                            </svg>
+                        </button>
+                        <button class="btn-icon btn-delete" onclick="event.stopPropagation(); deletePolicy('${policy.id}')" title="Delete Policy">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </td>
             </tr>
         `;
     });
@@ -805,6 +956,18 @@ function displayPolicies(policies) {
     `;
     
     list.innerHTML = html;
+    
+    // Force reflow to ensure buttons are rendered
+    const buttons = list.querySelectorAll('.btn-icon');
+    console.log('Policies table rendered with action buttons');
+    console.log('Action buttons count:', buttons.length);
+    console.log('Action buttons HTML:', buttons.length > 0 ? buttons[0].outerHTML : 'No buttons found');
+    
+    // Ensure buttons are visible
+    buttons.forEach(btn => {
+        btn.style.display = 'flex';
+        btn.style.visibility = 'visible';
+    });
     
     // Add event delegation for policy row clicks
     const table = list.querySelector('.policies-table');
@@ -864,8 +1027,9 @@ async function createPolicy(event) {
     
     const policyName = document.getElementById('policyName').value.trim();
     const policyDescription = document.getElementById('policyDescription').value.trim();
-    const selectedEntities = Array.from(document.getElementById('policyEntities').selectedOptions)
-        .map(option => option.value);
+    // Get selected entities from checkboxes
+    const selectedEntities = Array.from(document.querySelectorAll('input[name="policyEntities"]:checked'))
+        .map(checkbox => checkbox.value);
     const policyAction = document.getElementById('policyAction').value;
     const policySeverity = document.getElementById('policySeverity').value;
     
@@ -935,7 +1099,7 @@ async function createPolicy(event) {
 }
 
 async function deletePolicy(policyId) {
-    if (!confirm('Are you sure you want to delete this policy?')) {
+    if (!confirm('Are you sure you want to delete this policy? This action can be undone by restoring the policy.')) {
         return;
     }
     
@@ -946,7 +1110,7 @@ async function deletePolicy(policyId) {
         });
         
         if (response.ok) {
-            showNotification('Policy deleted successfully', 'success');
+            showNotification('Policy deleted successfully. You can restore it from deleted policies.', 'success');
             loadPolicies();
         } else {
             if (response.status === 401 || response.status === 403) {
@@ -963,6 +1127,104 @@ async function deletePolicy(policyId) {
         console.error('Error deleting policy:', error);
         showNotification('Error: ' + error.message, 'error');
     }
+}
+
+async function restorePolicy(policyId) {
+    if (!confirm('Are you sure you want to restore this policy?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/policies/${policyId}/restore`, {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+        
+        if (response.ok) {
+            showNotification('Policy restored successfully', 'success');
+            loadPolicies();
+            loadDeletedPolicies();
+        } else {
+            if (response.status === 401 || response.status === 403) {
+                console.log('Unauthorized - logging out user');
+                showNotification('Session expired. Please login again.', 'warning');
+                logout();
+                return;
+            }
+            const error = await response.json();
+            const errorMsg = error.detail || error.message || 'Failed to restore policy';
+            showNotification('Error: ' + errorMsg, 'error');
+        }
+    } catch (error) {
+        console.error('Error restoring policy:', error);
+        showNotification('Error: ' + error.message, 'error');
+    }
+}
+
+async function loadDeletedPolicies() {
+    try {
+        const response = await fetch('/api/policies/deleted', {
+            headers: getAuthHeaders()
+        });
+        
+        if (!response.ok) {
+            if (response.status === 401 || response.status === 403) {
+                console.log('Unauthorized - logging out user');
+                showNotification('Session expired. Please login again.', 'warning');
+                logout();
+                return;
+            }
+            throw new Error('Failed to load deleted policies');
+        }
+        
+        const deletedPolicies = await response.json();
+        displayDeletedPolicies(deletedPolicies);
+    } catch (error) {
+        console.error('Error loading deleted policies:', error);
+    }
+}
+
+function displayDeletedPolicies(policies) {
+    const container = document.getElementById('deletedPoliciesList');
+    if (!container) return;
+    
+    if (policies.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>No deleted policies found</p></div>';
+        return;
+    }
+    
+    let html = '<div class="table-container"><table class="policies-table"><thead><tr><th>Name</th><th>Description</th><th>Action</th><th>Severity</th><th>Deleted At</th><th>Actions</th></tr></thead><tbody>';
+    
+    policies.forEach(policy => {
+        const descriptionText = policy.description || 'No description';
+        const truncatedDescription = descriptionText.length > 50 
+            ? descriptionText.substring(0, 50) + '...' 
+            : descriptionText;
+        
+        html += `
+            <tr>
+                <td><strong>${policy.name}</strong></td>
+                <td><span title="${descriptionText}">${truncatedDescription}</span></td>
+                <td><span class="badge badge-info">${policy.action}</span></td>
+                <td><span class="badge badge-${policy.severity === 'high' || policy.severity === 'critical' ? 'danger' : policy.severity === 'medium' ? 'warning' : 'info'}">${policy.severity}</span></td>
+                <td>${policy.updated_at ? new Date(policy.updated_at).toLocaleString() : 'N/A'}</td>
+                <td>
+                    <button class="btn btn-success btn-small" onclick="restorePolicy('${policy.id}')" title="Restore Policy">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+                            <path d="M21 3v5h-5"></path>
+                            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
+                            <path d="M3 21v-5h5"></path>
+                        </svg>
+                        Restore
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
 }
 
 async function togglePolicy(policyId, enabled) {
@@ -1025,10 +1287,12 @@ async function editPolicy(policyId) {
         document.getElementById('policySeverity').value = policy.severity || 'medium';
         
         // Set entity types (multiple select)
-        const entitySelect = document.getElementById('policyEntities');
-        Array.from(entitySelect.options).forEach(option => {
-            option.selected = policy.entity_types && policy.entity_types.includes(option.value);
+        // Set checkboxes based on policy entity types
+        const entityCheckboxes = document.querySelectorAll('input[name="policyEntities"]');
+        entityCheckboxes.forEach(checkbox => {
+            checkbox.checked = policy.entity_types && policy.entity_types.includes(checkbox.value);
         });
+        updateSelectedEntitiesTags();
         
         // Change form to edit mode
         const form = document.getElementById('policyForm');
@@ -1070,8 +1334,9 @@ async function updatePolicy(event) {
     
     const policyName = document.getElementById('policyName').value.trim();
     const policyDescription = document.getElementById('policyDescription').value.trim();
-    const selectedEntities = Array.from(document.getElementById('policyEntities').selectedOptions)
-        .map(option => option.value);
+    // Get selected entities from checkboxes
+    const selectedEntities = Array.from(document.querySelectorAll('input[name="policyEntities"]:checked'))
+        .map(checkbox => checkbox.value);
     const policyAction = document.getElementById('policyAction').value;
     const policySeverity = document.getElementById('policySeverity').value;
     
@@ -1144,6 +1409,11 @@ function resetPolicyForm() {
     if (!form) return;
     
     form.reset();
+    // Clear checkboxes
+    document.querySelectorAll('input[name="policyEntities"]').forEach(checkbox => {
+        checkbox.checked = false;
+    });
+    updateSelectedEntitiesTags();
     // Restore original onsubmit from HTML
     form.setAttribute('onsubmit', 'createPolicy(event)');
     delete form.dataset.editPolicyId;
@@ -1158,7 +1428,7 @@ function resetPolicyForm() {
 }
 
 // Alert functions
-async function loadAlerts() {
+async function loadAlerts(page = 1) {
     try {
         // Only load if user is logged in and is admin
         if (!authToken || !currentUser || currentUser.role !== 'admin') {
@@ -1166,7 +1436,9 @@ async function loadAlerts() {
             return;
         }
         
-        const response = await fetch('/api/alerts/', {
+        currentAlertsPage = page;
+        const limit = alertsPagination.limit || 10;
+        const response = await fetch(`/api/alerts/?page=${page}&limit=${limit}`, {
             headers: getAuthHeaders()
         });
         if (!response.ok) {
@@ -1175,19 +1447,35 @@ async function loadAlerts() {
                 logout();
                 return;
             }
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorText = await response.text().catch(() => 'Unknown error');
+            console.error('Alerts API error:', response.status, errorText);
+            throw new Error(`HTTP error! status: ${response.status}, message: ${errorText.substring(0, 100)}`);
         }
-        const alerts = await response.json();
+        const data = await response.json();
+        console.log('Alerts data received:', data);
+        
+        // Handle both paginated and non-paginated responses
+        const alerts = Array.isArray(data) ? data : (data.items || []);
+        alertsPagination = {
+            total: data.total || alerts.length,
+            total_pages: data.total_pages || 1,
+            limit: data.limit || limit,
+            has_next: data.has_next !== undefined ? data.has_next : (page < (data.total_pages || 1)),
+            has_prev: data.has_prev !== undefined ? data.has_prev : (page > 1)
+        };
+        
+        console.log('Alerts pagination:', alertsPagination);
         displayAlerts(alerts);
+        renderPagination('alerts', currentAlertsPage, alertsPagination, loadAlerts);
     } catch (error) {
         console.error('Error loading alerts:', error);
         const alertsList = document.getElementById('alertsList');
         if (alertsList) {
-            alertsList.innerHTML = '<p style="color: var(--danger);">Error loading alerts</p>';
+            alertsList.innerHTML = `<p style="color: var(--danger);">Error loading alerts: ${error.message || 'Unknown error'}</p>`;
         }
         // Only show notification if user is admin
         if (currentUser && currentUser.role === 'admin') {
-        showNotification('Error loading alerts', 'error');
+            showNotification(`Error loading alerts: ${error.message || 'Unknown error'}`, 'error');
         }
     }
 }
@@ -1200,10 +1488,25 @@ function displayAlerts(alerts) {
         return;
     }
     
-    if (!alerts || alerts.length === 0) {
+    // Ensure alerts is an array
+    if (!alerts) {
+        console.warn('Alerts data is null or undefined');
         list.innerHTML = '<div class="empty-state"><p>No alerts found. All clear!</p></div>';
         return;
     }
+    
+    if (!Array.isArray(alerts)) {
+        console.error('Alerts is not an array:', typeof alerts, alerts);
+        list.innerHTML = '<div class="empty-state"><p>Error: Invalid alerts data format</p></div>';
+        return;
+    }
+    
+    if (alerts.length === 0) {
+        list.innerHTML = '<div class="empty-state"><p>No alerts found. All clear!</p></div>';
+        return;
+    }
+    
+    console.log('Displaying alerts:', alerts.length, 'alerts');
     
     let html = `
         <div class="table-container">
@@ -1431,27 +1734,25 @@ function showAlertDetails(alertId, alertData) {
         minute: '2-digit'
     });
     
-    // Extract primary title and policy name from alert title
+    // Use policy_name from API response if available, otherwise extract from title
+    // Title is now the policy name directly
     const fullTitle = alert.title || 'Security Alert';
     let primaryTitle = fullTitle;
-    let policyName = null;
+    let policyName = alert.policy_name || fullTitle;  // Use policy_name from API, fallback to title
     
-    // Check if title contains policy name pattern
-    if (fullTitle.includes('Policy:')) {
-        const parts = fullTitle.split('Policy:');
-        primaryTitle = parts[0].trim() || 'Security Incident';
-        policyName = parts[1] ? parts[1].trim() : null;
-    } else if (fullTitle.includes('- Policy')) {
-        const parts = fullTitle.split('- Policy');
-        primaryTitle = parts[0].trim() || 'Security Incident';
-        policyName = parts[1] ? parts[1].trim() : null;
+    // If policy_name is not provided, use title as policy name (since title is now policy name)
+    if (!alert.policy_name) {
+        policyName = fullTitle;
     }
     
-    // Clean up primary title - remove trailing dashes and normalize
-    primaryTitle = primaryTitle.replace(/^Sensitive data detected/i, 'Sensitive Data Detected');
-    primaryTitle = primaryTitle.replace(/\s*-\s*$/, '').trim();
-    if (!primaryTitle || primaryTitle === '-') {
-        primaryTitle = 'Security Incident Detected';
+    // Primary title is the policy name
+    primaryTitle = policyName || 'Security Alert';
+    
+    // Only show policy name if it exists and policy_id is valid
+    if (!alert.policy_id) {
+        // Policy was deleted, show generic message
+        primaryTitle = 'Security Alert';
+        policyName = null;
     }
     
     const severityClass = alert.severity === 'high' || alert.severity === 'critical' ? 'danger' : alert.severity === 'medium' ? 'warning' : 'info';
@@ -1609,7 +1910,7 @@ async function updateAlertStatus(alertId) {
 }
 
 // Monitoring functions
-async function loadMonitoringData() {
+async function loadMonitoringData(page = 1) {
     try {
         // Only load if user is logged in and is admin
         if (!authToken || !currentUser || currentUser.role !== 'admin') {
@@ -1617,11 +1918,13 @@ async function loadMonitoringData() {
             return;
         }
         
+        currentMonitoringPage = page;
         const headers = getAuthHeaders();
-        const [statusResponse, summaryResponse, emailStatsResponse] = await Promise.all([
+        const [statusResponse, summaryResponse, emailStatsResponse, logsResponse] = await Promise.all([
             fetch('/api/monitoring/status', { headers }),
             fetch('/api/monitoring/reports/summary?days=7', { headers }),
-            fetch('/api/monitoring/email/statistics?days=7', { headers })
+            fetch('/api/monitoring/email/statistics?days=7', { headers }),
+            fetch(`/api/monitoring/reports/logs?page=${page}&limit=${monitoringPagination.limit}`, { headers })
         ]);
         
         // Check if main responses are ok
@@ -1647,6 +1950,19 @@ async function loadMonitoringData() {
         const status = await statusResponse.json();
         const summary = await summaryResponse.json();
         const emailStats = emailStatsResponse.ok ? await emailStatsResponse.json().catch(() => null) : null;
+        const logsData = logsResponse.ok ? await logsResponse.json().catch(() => null) : null;
+        
+        // Handle logs pagination
+        if (logsData) {
+            const logs = logsData.items || logsData.logs || [];
+            monitoringPagination = {
+                total: logsData.total || logs.length,
+                total_pages: logsData.total_pages || 1,
+                limit: logsData.limit || monitoringPagination.limit,
+                has_next: logsData.has_next || false,
+                has_prev: logsData.has_prev || false
+            };
+        }
         
         // Debug: Log MyDLP status from API
         console.log('MyDLP status from API:', {
@@ -1657,24 +1973,20 @@ async function loadMonitoringData() {
         });
         
         // Display data
-        displayMonitoringData(status, summary, emailStats);
-        
-        // Load email logs if stats are available
-        if (emailStats) {
-            try {
-            await loadEmailLogs();
-            } catch (logError) {
-                console.warn('Error loading email logs (non-critical):', logError);
-                // Don't show error notification for email logs - it's optional
-            }
-        }
+        displayMonitoringData(status, summary, emailStats, logsData);
     } catch (error) {
         console.error('Error loading monitoring data:', error);
         const monitoringData = document.getElementById('monitoringData');
         if (monitoringData) {
             // Show a more user-friendly error message
             const errorMessage = error.message || 'Unknown error';
-            monitoringData.innerHTML = `<p style="color: var(--danger);">Error loading data: ${errorMessage.substring(0, 100)}</p>`;
+            try {
+                monitoringData.innerHTML = `<p style="color: var(--danger);">Error loading data: ${errorMessage.substring(0, 100)}</p>`;
+            } catch (e) {
+                console.error('Error setting monitoringData innerHTML:', e);
+            }
+        } else {
+            console.error('monitoringData element not found');
         }
         // Only show notification if it's a critical error (not 401/403)
         if (currentUser && currentUser.role === 'admin') {
@@ -1686,7 +1998,7 @@ async function loadMonitoringData() {
     }
 }
 
-function displayMonitoringData(status, summary, emailStats) {
+function displayMonitoringData(status, summary, emailStats, logsData = null) {
     const container = document.getElementById('monitoringData');
     
     if (!container) {
@@ -1695,15 +2007,28 @@ function displayMonitoringData(status, summary, emailStats) {
     }
     
     // Validate data structure
+    if (!container) {
+        console.error('monitoringData container not found in displayMonitoringData');
+        return;
+    }
+    
     if (!summary || !summary.summary) {
         console.error('Invalid summary data structure:', summary);
-        container.innerHTML = '<p style="color: var(--danger);">Error: Invalid data structure</p>';
+        try {
+            container.innerHTML = '<p style="color: var(--danger);">Error: Invalid data structure</p>';
+        } catch (e) {
+            console.error('Error setting container innerHTML:', e);
+        }
         return;
     }
     
     if (!status) {
         console.error('Invalid status data structure:', status);
-        container.innerHTML = '<p style="color: var(--danger);">Error: Invalid status data</p>';
+        try {
+            container.innerHTML = '<p style="color: var(--danger);">Error: Invalid status data</p>';
+        } catch (e) {
+            console.error('Error setting container innerHTML:', e);
+        }
         return;
     }
     
@@ -1782,10 +2107,163 @@ function displayMonitoringData(status, summary, emailStats) {
     
     container.innerHTML = html;
     
+    // Display logs if available
+    if (logsData) {
+        const logs = Array.isArray(logsData) ? logsData : (logsData.items || logsData.logs || []);
+        if (Array.isArray(logs)) {
+            displayMonitoringLogs(logs);
+            renderPagination('monitoring', currentMonitoringPage, monitoringPagination, loadMonitoringData);
+        } else {
+            console.warn('Logs data is not an array:', typeof logs, logs);
+        }
+    }
+    
     // Display email statistics if available
     if (emailStats) {
         displayEmailStats(emailStats);
     }
+}
+
+function displayMonitoringLogs(logs) {
+    let container = document.getElementById('monitoringLogs');
+    if (!container) {
+        // Create logs container if it doesn't exist
+        const monitoringData = document.getElementById('monitoringData');
+        if (!monitoringData) {
+            console.error('monitoringData container not found');
+            return;
+        }
+        container = document.createElement('div');
+        container.id = 'monitoringLogs';
+        container.className = 'monitoring-logs-section';
+        monitoringData.appendChild(container);
+    }
+    
+    // Ensure logs is an array
+    if (!logs || !Array.isArray(logs)) {
+        console.warn('Logs is not an array:', typeof logs, logs);
+        container.innerHTML = '<div class="empty-state"><p>No logs found</p></div>';
+        return;
+    }
+    
+    if (logs.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>No logs found</p></div>';
+        return;
+    }
+    
+    let html = '<h3 style="margin-top: 24px; margin-bottom: 16px;">Recent Logs</h3><div class="table-container"><table class="logs-table"><thead><tr><th>Time</th><th>Event Type</th><th>Level</th><th>Message</th><th>Source</th></tr></thead><tbody>';
+    
+    logs.forEach(log => {
+        const time = log.created_at ? new Date(log.created_at).toLocaleString() : 'N/A';
+        html += `
+            <tr>
+                <td>${time}</td>
+                <td><span class="badge badge-info">${log.event_type || 'N/A'}</span></td>
+                <td><span class="badge badge-${log.level === 'error' ? 'danger' : log.level === 'warning' ? 'warning' : 'info'}">${log.level || 'info'}</span></td>
+                <td>${log.message || 'N/A'}</td>
+                <td>${log.source_user || log.source_ip || 'N/A'}</td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+// Pagination rendering function
+function renderPagination(section, currentPage, pagination, loadFunction) {
+    const containerId = `${section}Pagination`;
+    let container = document.getElementById(containerId);
+    
+    if (!container) {
+        // Create pagination container
+        const parentContainer = document.getElementById(`${section}List`) || 
+                               document.getElementById(`${section}Data`) ||
+                               document.getElementById('policiesList') ||
+                               document.getElementById('usersList') ||
+                               document.getElementById('alertsList') ||
+                               document.getElementById('monitoringData') ||
+                               document.getElementById('monitoringLogs');
+        
+        if (!parentContainer) {
+            console.warn(`Parent container not found for pagination: ${section}`);
+            return;
+        }
+        
+        container = document.createElement('div');
+        container.id = containerId;
+        container.className = 'pagination';
+        parentContainer.appendChild(container);
+    }
+    
+    if (pagination.total_pages <= 1) {
+        container.innerHTML = '';
+        return;
+    }
+    
+    const total = pagination.total;
+    const totalPages = pagination.total_pages;
+    const start = (currentPage - 1) * pagination.limit + 1;
+    const end = Math.min(currentPage * pagination.limit, total);
+    
+    let html = `
+        <div class="pagination-info">
+            Showing ${start}-${end} of ${total}
+        </div>
+        <div class="pagination-controls">
+    `;
+    
+    // Previous button
+    html += `
+        <button class="pagination-btn" onclick="${loadFunction.name}(${currentPage - 1})" ${!pagination.has_prev ? 'disabled' : ''}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+        </button>
+    `;
+    
+    // Page numbers
+    const maxVisible = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+    
+    if (endPage - startPage < maxVisible - 1) {
+        startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+    
+    if (startPage > 1) {
+        html += `<button class="pagination-btn" onclick="${loadFunction.name}(1)">1</button>`;
+        if (startPage > 2) {
+            html += `<span class="pagination-ellipsis">...</span>`;
+        }
+    }
+    
+    for (let i = startPage; i <= endPage; i++) {
+        html += `
+            <button class="pagination-btn ${i === currentPage ? 'active' : ''}" onclick="${loadFunction.name}(${i})">
+                ${i}
+            </button>
+        `;
+    }
+    
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            html += `<span class="pagination-ellipsis">...</span>`;
+        }
+        html += `<button class="pagination-btn" onclick="${loadFunction.name}(${totalPages})">${totalPages}</button>`;
+    }
+    
+    // Next button
+    html += `
+        <button class="pagination-btn" onclick="${loadFunction.name}(${currentPage + 1})" ${!pagination.has_next ? 'disabled' : ''}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+        </button>
+    `;
+    
+    html += '</div>';
+    container.innerHTML = html;
 }
 
 function displayEmailStats(stats) {
@@ -1814,67 +2292,6 @@ function displayEmailStats(stats) {
     container.innerHTML = html;
 }
 
-async function loadEmailLogs() {
-    try {
-        const response = await fetch('/api/monitoring/email/logs?limit=10', {
-            headers: getAuthHeaders()
-        });
-        if (!response.ok) {
-            if (response.status === 401 || response.status === 403) {
-                console.log('Unauthorized to load email logs - logging out');
-                logout();
-                return;
-            }
-            return;
-        }
-        
-        const data = await response.json();
-        displayEmailLogs(data.logs || []);
-    } catch (error) {
-        console.error('Error loading email logs:', error);
-    }
-}
-
-function displayEmailLogs(logs) {
-    const container = document.getElementById('emailLogs');
-    if (!container) return;
-    
-    if (logs.length === 0) {
-        container.innerHTML = '<div class="empty-state"><p>No email logs yet. Test email monitoring to see results.</p></div>';
-        return;
-    }
-    
-    let html = '<h4 style="margin-top: 24px; margin-bottom: 16px; color: var(--dark);">Recent Email Activity</h4>';
-    html += '<div class="email-logs-list">';
-    
-    logs.forEach(log => {
-        const emailData = log.email_data || {};
-        const fromEmail = emailData.from || 'Unknown';
-        const toEmails = Array.isArray(emailData.to) ? emailData.to.join(', ') : emailData.to || 'Unknown';
-        const subject = emailData.subject || 'No subject';
-        
-        html += `
-            <div class="email-log-item">
-                <div class="email-log-header">
-                    <div class="email-log-from">
-                        <strong>From:</strong> ${fromEmail}
-                    </div>
-                    <div class="email-log-time">
-                        ${new Date(log.created_at).toLocaleString('en-US')}
-                    </div>
-                </div>
-                <div class="email-log-details">
-                    <div><strong>To:</strong> ${toEmails}</div>
-                    <div><strong>Subject:</strong> ${subject}</div>
-                    ${emailData.has_attachments ? `<div><strong>Attachments:</strong> ${emailData.attachment_count || 0} file(s)</div>` : ''}
-                </div>
-            </div>
-        `;
-    });
-    
-    html += '</div>';
-    container.innerHTML = html;
-}
 
 function showEmailTestForm() {
     // Switch to Test Email tab
@@ -2621,6 +3038,18 @@ function closeRegisterModal() {
 
 // Users Management (Admin only)
 let currentUsersView = 'all';
+let currentUsersPage = 1;
+let usersPagination = { total: 0, total_pages: 0, limit: 10 };
+
+// Pagination state for other sections
+let currentPoliciesPage = 1;
+let policiesPagination = { total: 0, total_pages: 0, limit: 50 };
+
+let currentAlertsPage = 1;
+let alertsPagination = { total: 0, total_pages: 0, limit: 10, has_next: false, has_prev: false };
+
+let currentMonitoringPage = 1;
+let monitoringPagination = { total: 0, total_pages: 0, limit: 10 };
 
 function switchUsersView(view, buttonElement) {
     currentUsersView = view;
@@ -2637,24 +3066,31 @@ function switchUsersView(view, buttonElement) {
     if (view === 'pending') {
         loadPendingUsers();
     } else if (view === 'active') {
-        loadUsers('active');
+        loadUsers('active', 1);
     } else {
-        loadUsers();
+        // Load all users with pagination
+        loadUsers(null, 1);
     }
 }
 
-async function loadUsers(statusFilter = null) {
+async function loadUsers(statusFilter = null, page = 1) {
     if (!currentUser || currentUser.role !== 'admin') {
         showNotification('Admin access required', 'error');
         return;
     }
 
     try {
+        currentUsersPage = page;
         let url = '/api/users/';
         const params = new URLSearchParams();
         if (statusFilter === 'active') {
-            params.append('status', 'approved');
+            // For active users, we need to filter by both status (approved or active) and is_active=true
+            // Since API doesn't support is_active filter directly, we'll get all approved/active users
+            // and filter on frontend, or we can use status=active if it exists
+            params.append('status', 'active');
         }
+        params.append('page', page);
+        params.append('limit', usersPagination.limit);
         if (params.toString()) {
             url += '?' + params.toString();
         }
@@ -2671,8 +3107,29 @@ async function loadUsers(statusFilter = null) {
             throw new Error('Failed to load users');
         }
 
-        const users = await response.json();
+        const data = await response.json();
+        console.log('Users API response:', data);
+        
+        // Handle both paginated and non-paginated responses
+        const users = Array.isArray(data) ? data : (data.items || []);
+        
+        if (!Array.isArray(users)) {
+            console.error('Users is not an array:', typeof users, users);
+            throw new Error('Invalid users data format');
+        }
+        
+        usersPagination = {
+            total: data.total || users.length,
+            total_pages: data.total_pages || 1,
+            limit: data.limit || usersPagination.limit,
+            has_next: data.has_next !== undefined ? data.has_next : (currentUsersPage < (data.total_pages || 1)),
+            has_prev: data.has_prev !== undefined ? data.has_prev : (currentUsersPage > 1)
+        };
+        
+        console.log('Users loaded successfully:', users.length, 'users');
+        console.log('Users pagination:', usersPagination);
         displayUsers(users);
+        renderPagination('users', currentUsersPage, usersPagination, (p) => loadUsers(statusFilter, p));
 
     } catch (error) {
         showNotification('Error loading users: ' + error.message, 'error');
@@ -2721,6 +3178,19 @@ async function loadPendingUsers() {
 function displayUsers(users) {
     const container = document.getElementById('usersList');
     if (!container) return;
+    
+    // Ensure users is an array
+    if (!users) {
+        console.warn('Users data is null or undefined');
+        container.innerHTML = '<div class="empty-state"><p>No users found</p></div>';
+        return;
+    }
+    
+    if (!Array.isArray(users)) {
+        console.error('Users is not an array:', typeof users, users);
+        container.innerHTML = '<div class="empty-state"><p>Error: Invalid users data format</p></div>';
+        return;
+    }
 
     // Bind delegated handlers once (survives re-renders via innerHTML)
     if (!container.dataset.userActionsBound) {
@@ -2765,73 +3235,231 @@ function displayUsers(users) {
         return;
     }
 
-    let html = '';
+    // Create table layout
+    let html = `
+        <div class="table-container">
+            <table class="users-table">
+                <thead>
+                    <tr>
+                        <th>User</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Status</th>
+                        <th>Account Status</th>
+                        <th>Created</th>
+                        <th>Last Login</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
     users.forEach(user => {
-        const statusClass = user.status === 'pending' ? 'pending' :
-            user.status === 'approved' ? 'approved' : 'rejected';
         const statusBadge = {
             'pending': '<span class="badge badge-warning">Pending</span>',
             'approved': '<span class="badge badge-success">Approved</span>',
             'rejected': '<span class="badge badge-danger">Rejected</span>',
             'active': '<span class="badge badge-success">Active</span>'
-        }[user.status] || '';
+        }[user.status] || '<span class="badge badge-secondary">Unknown</span>';
 
         const roleBadge = user.role === 'admin'
             ? '<span class="badge badge-danger">Admin</span>'
-            : '<span class="badge badge-info">Regular</span>';
+            : '<span class="badge badge-info">User</span>';
+
+        const accountStatusBadge = user.is_active === false
+            ? '<span class="badge badge-warning">Suspended</span>'
+            : user.status === 'approved' || user.status === 'active'
+            ? '<span class="badge badge-success">Active</span>'
+            : statusBadge;
+
+        const createdDate = user.created_at ? new Date(user.created_at).toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'short', 
+            day: 'numeric' 
+        }) : 'N/A';
+
+        const lastLogin = user.last_login ? new Date(user.last_login).toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'short', 
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        }) : '<span class="text-muted">Never</span>';
 
         html += `
-            <div class="user-card ${statusClass}" data-testid="user-card-${user.id}">
-                <h3>
-                    ${user.username}
-                    ${statusBadge}
-                    ${roleBadge}
-                </h3>
-                <div class="user-details">
-                    <div class="user-detail-item">
-                        <strong>Email</strong>
-                        <span>${user.email}</span>
-                    </div>
-                    <div class="user-detail-item">
-                        <strong>Status</strong>
-                        <span>${user.status}</span>
-                    </div>
-                    <div class="user-detail-item">
-                        <strong>Role</strong>
-                        <span>${user.role}</span>
-                    </div>
-                    <div class="user-detail-item">
-                        <strong>Created</strong>
-                        <span>${new Date(user.created_at).toLocaleDateString()}</span>
-                    </div>
-                </div>
-                ${user.status === 'pending' ? `
-                    <div class="user-actions">
-                        <button class="btn btn-success btn-small" type="button" data-testid="approve-user-btn" data-user-id="${user.id}">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="20 6 9 17 4 12"></polyline>
+            <tr data-user-id="${user.id}" class="user-row ${user.status === 'pending' ? 'row-pending' : ''}">
+                <td>
+                    <div class="user-info-cell">
+                        <div class="user-avatar">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="12" cy="7" r="4"></circle>
                             </svg>
-                            Approve
-                        </button>
-                        <button class="btn btn-danger btn-small" type="button" data-testid="reject-user-btn" data-user-id="${user.id}">
+                        </div>
+                        <div class="user-name-info">
+                            <strong>${user.username}</strong>
+                            ${user.rejection_reason ? `<div class="rejection-reason-tooltip" title="${user.rejection_reason}">⚠️ Rejected</div>` : ''}
+                        </div>
+                    </div>
+                </td>
+                <td>
+                    <div class="email-cell">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px; opacity: 0.6;">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                            <polyline points="22,6 12,13 2,6"></polyline>
+                        </svg>
+                        ${user.email}
+                    </div>
+                </td>
+                <td>${roleBadge}</td>
+                <td>${statusBadge}</td>
+                <td>${accountStatusBadge}</td>
+                <td><span class="date-cell">${createdDate}</span></td>
+                <td><span class="date-cell">${lastLogin}</span></td>
+                <td>
+                    <div class="action-buttons">
+                        ${user.status === 'pending' ? `
+                            <button class="btn-icon btn-success" onclick="event.stopPropagation(); approveUser('${user.id}')" title="Approve User" data-testid="approve-user-btn" data-user-id="${user.id}">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                </svg>
+                            </button>
+                            <button class="btn-icon btn-danger" onclick="event.stopPropagation(); rejectUser('${user.id}')" title="Reject User" data-testid="reject-user-btn" data-user-id="${user.id}">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                        ` : ''}
+                        ${user.status === 'approved' || user.status === 'active' ? `
+                            ${user.is_active ? `
+                                <button class="btn-icon btn-warning" onclick="event.stopPropagation(); suspendUser('${user.id}')" title="Suspend User">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect x="6" y="4" width="4" height="16" rx="1"></rect>
+                                        <rect x="14" y="4" width="4" height="16" rx="1"></rect>
+                                    </svg>
+                                </button>
+                                ` : `
+                                <button class="btn-icon btn-success" onclick="event.stopPropagation(); activateUser('${user.id}')" title="Activate User">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                                    </svg>
+                                </button>
+                            `}
+                        ` : ''}
+                        <button class="btn-icon btn-delete" onclick="event.stopPropagation(); deleteUser('${user.id}')" title="Delete User">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="18" y1="6" x2="6" y2="18"></line>
-                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                             </svg>
-                            Reject
                         </button>
                     </div>
-                ` : ''}
-                ${user.rejection_reason ? `
-                    <div class="alert-banner alert-danger" style="margin-top: 12px;">
-                        <strong>Rejection Reason:</strong> ${user.rejection_reason}
-                    </div>
-                ` : ''}
-            </div>
+                </td>
+            </tr>
         `;
     });
 
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+
     container.innerHTML = html;
+    
+    console.log('Users displayed in table format');
+    console.log('User rows count:', container.querySelectorAll('.user-row').length);
+}
+
+// User management functions
+async function suspendUser(userId) {
+    if (!confirm('Are you sure you want to suspend this user? They will not be able to login.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/users/${userId}/suspend`, {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+        
+        if (response.ok) {
+            showNotification('User suspended successfully', 'success');
+            loadUsers();
+        } else {
+            if (response.status === 401 || response.status === 403) {
+                showNotification('Session expired. Please login again.', 'warning');
+                logout();
+                return;
+            }
+            const error = await response.json();
+            const errorMsg = error.detail || error.message || 'Failed to suspend user';
+            showNotification('Error: ' + errorMsg, 'error');
+        }
+    } catch (error) {
+        console.error('Error suspending user:', error);
+        showNotification('Error: ' + error.message, 'error');
+    }
+}
+
+async function activateUser(userId) {
+    if (!confirm('Are you sure you want to activate this user? They will be able to login again.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/users/${userId}/activate`, {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+        
+        if (response.ok) {
+            showNotification('User activated successfully', 'success');
+            loadUsers();
+        } else {
+            if (response.status === 401 || response.status === 403) {
+                showNotification('Session expired. Please login again.', 'warning');
+                logout();
+                return;
+            }
+            const error = await response.json();
+            const errorMsg = error.detail || error.message || 'Failed to activate user';
+            showNotification('Error: ' + errorMsg, 'error');
+        }
+    } catch (error) {
+        console.error('Error activating user:', error);
+        showNotification('Error: ' + error.message, 'error');
+    }
+}
+
+async function deleteUser(userId) {
+    if (!confirm('Are you sure you want to permanently delete this user? This action cannot be undone!')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/users/${userId}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+        });
+        
+        if (response.ok || response.status === 204) {
+            showNotification('User deleted successfully', 'success');
+            loadUsers();
+        } else {
+            if (response.status === 401 || response.status === 403) {
+                showNotification('Session expired. Please login again.', 'warning');
+                logout();
+                return;
+            }
+            const error = await response.json();
+            const errorMsg = error.detail || error.message || 'Failed to delete user';
+            showNotification('Error: ' + errorMsg, 'error');
+        }
+    } catch (error) {
+        console.error('Error deleting user:', error);
+        showNotification('Error: ' + error.message, 'error');
+    }
 }
 
 // Make functions globally available IMMEDIATELY
@@ -2961,6 +3589,13 @@ window.handleLogin = handleLogin;
 window.handleRegister = handleRegister;
 window.logout = logout;
 window.loadUsers = loadUsers;
+window.suspendUser = suspendUser;
+window.activateUser = activateUser;
+window.deleteUser = deleteUser;
+window.restorePolicy = restorePolicy;
+window.editPolicy = editPolicy;
+window.loadDeletedPolicies = loadDeletedPolicies;
+window.switchPoliciesView = switchPoliciesView;
 window.loadPendingUsers = loadPendingUsers;
 window.switchUsersView = switchUsersView;
 // approveUser and rejectUser are already defined in window scope above
@@ -2976,10 +3611,58 @@ window.closeModal = closeModal;
 window.createPolicy = createPolicy;
 window.deletePolicy = deletePolicy;
 window.togglePolicy = togglePolicy;
-window.editPolicy = editPolicy;
 window.updatePolicy = updatePolicy;
 window.resetPolicyForm = resetPolicyForm;
 window.showNotification = showNotification;
+
+// Function to update selected entities tags display
+function updateSelectedEntitiesTags() {
+    const selectedCheckboxes = document.querySelectorAll('input[name="policyEntities"]:checked');
+    const tagsContainer = document.getElementById('selectedEntitiesTags');
+    if (!tagsContainer) return;
+    
+    const entityLabels = {
+        'PERSON': 'Person',
+        'PHONE_NUMBER': 'Phone Number',
+        'EMAIL_ADDRESS': 'Email Address',
+        'CREDIT_CARD': 'Credit Card',
+        'ADDRESS': 'Address',
+        'ORGANIZATION': 'Organization',
+        'DATE_TIME': 'Date/Time',
+        'LOCATION': 'Location',
+        'IBAN_CODE': 'IBAN Code',
+        'IP_ADDRESS': 'IP Address',
+        'US_SSN': 'US SSN',
+        'MALICIOUS_SCRIPT': 'Malicious Script'
+    };
+    
+    if (selectedCheckboxes.length === 0) {
+        tagsContainer.style.display = 'none';
+        return;
+    }
+    
+    tagsContainer.style.display = 'flex';
+    let html = '<span class="tag-label">Selected:</span>';
+    
+    selectedCheckboxes.forEach(checkbox => {
+        const label = entityLabels[checkbox.value] || checkbox.value;
+        html += `
+            <span class="entity-tag">
+                ${label}
+                <span class="remove-tag" onclick="document.querySelector('input[value=\\'${checkbox.value}\\']').click(); updateSelectedEntitiesTags();" title="Remove">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </span>
+            </span>
+        `;
+    });
+    
+    tagsContainer.innerHTML = html;
+}
+
+window.updateSelectedEntitiesTags = updateSelectedEntitiesTags;
 window.showEmailTestForm = showEmailTestForm;
 window.closeEmailModal = closeEmailModal;
 window.testEmail = testEmail;
@@ -2988,6 +3671,12 @@ window.resetEmailForm = resetEmailForm;
 // Load data on page load
 window.addEventListener('DOMContentLoaded', () => {
     console.log('DOM loaded, initializing...');
+    
+    // Add change listeners to entity type checkboxes
+    const entityCheckboxes = document.querySelectorAll('input[name="policyEntities"]');
+    entityCheckboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', updateSelectedEntitiesTags);
+    });
     
     // Immediately disable emailFrom field
     const emailFromInput = document.getElementById('emailFrom');

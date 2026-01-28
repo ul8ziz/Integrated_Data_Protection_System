@@ -24,12 +24,12 @@ class PolicyService:
     
     async def get_active_policies(self) -> List[Policy]:
         """
-        Get all active policies
+        Get all active policies (enabled and not deleted)
         
         Returns:
             List of active policies
         """
-        return await Policy.find({"enabled": True}).to_list()
+        return await Policy.find({"enabled": True, "is_deleted": False}).to_list()
     
     async def apply_policy(self, text: str, source_ip: str = None, 
                     source_user: str = None, source_device: str = None) -> Dict[str, Any]:
@@ -80,13 +80,27 @@ class PolicyService:
                 "alert_created": False
             }
         
-        # Get active policies
+        # Get active policies (enabled and not deleted)
         policies = await self.get_active_policies()
+        
+        # If no active policies exist, return early - no actions should be taken
+        if not policies:
+            logger.debug("No active policies found - no actions will be taken")
+            return {
+                "sensitive_data_detected": len(detected_entities) > 0,
+                "detected_entities": detected_entities,
+                "actions_taken": [],
+                "blocked": False,
+                "alert_created": False,
+                "policies_matched": False,
+                "applied_policies": []
+            }
         
         # Check which policies apply
         actions_taken = []
         blocked = False
         alert_created = False
+        matching_policies = []  # Track policies that actually match
         
         for policy in policies:
             # Check if policy applies to detected entities
@@ -100,6 +114,8 @@ class PolicyService:
                 logger.debug(f"Policy {policy.id} ({policy.name}) does not apply - no matching entities")
                 continue
             
+            # Policy matches - add to matching policies
+            matching_policies.append(policy)
             logger.info(f"Policy {policy.id} ({policy.name}) applies - {len(relevant_entities)} relevant entities")
             
             # Apply policy action
@@ -152,33 +168,72 @@ class PolicyService:
                     alert_created = True
                     actions_taken.append("alert_created")
         
-        # Log the event
-        if text:
-            await self._log_event(
-                event_type="policy_applied",
-                message=f"Applied policies, detected {len(detected_entities)} entities",
-                source_ip=source_ip,
-                source_user=source_user,
-                metadata={
-                    "detected_entities_count": len(detected_entities),
-                    "policies_applied": len(policies),
-                    "blocked": blocked
-                }
-            )
-            
-            # Store detected entities
-            for entity in detected_entities:
-                await self._store_detected_entity(
-                    entity=entity,
-                    source_text_hash=self.encryption.hash_text(text)
+        # Only log and store entities if at least one policy matched
+        if matching_policies:
+            # Log the event
+            if text:
+                await self._log_event(
+                    event_type="policy_applied",
+                    message=f"Applied {len(matching_policies)} matching policies, detected {len(detected_entities)} entities",
+                    source_ip=source_ip,
+                    source_user=source_user,
+                    metadata={
+                        "detected_entities_count": len(detected_entities),
+                        "policies_applied": len(matching_policies),
+                        "matching_policy_ids": [str(p.id) for p in matching_policies],
+                        "blocked": blocked
+                    }
+                )
+                
+                # Store detected entities only if policies matched
+                for entity in detected_entities:
+                    await self._store_detected_entity(
+                        entity=entity,
+                        source_text_hash=self.encryption.hash_text(text)
+                    )
+        else:
+            # No policies matched - log but don't take any action
+            logger.info(f"Detected {len(detected_entities)} entities but no matching policies found - no actions taken")
+            if text:
+                await self._log_event(
+                    event_type="entities_detected_no_policy_match",
+                    message=f"Detected {len(detected_entities)} entities but no matching policies",
+                    source_ip=source_ip,
+                    source_user=source_user,
+                    metadata={
+                        "detected_entities_count": len(detected_entities),
+                        "detected_entity_types": list(set([e.get("entity_type", "unknown") for e in detected_entities])),
+                        "policies_applied": 0,
+                        "blocked": False
+                    }
                 )
         
+        # Prepare applied policies information
+        applied_policies = []
+        for policy in matching_policies:
+            policy_entities = policy.entity_types or []
+            relevant_entities = [
+                e for e in detected_entities 
+                if e["entity_type"] in policy_entities
+            ]
+            applied_policies.append({
+                "id": str(policy.id),
+                "name": policy.name,
+                "action": policy.action,
+                "severity": policy.severity,
+                "entity_types": policy_entities,
+                "matched_entities": [e["entity_type"] for e in relevant_entities],
+                "matched_count": len(relevant_entities)
+            })
+        
         return {
-            "sensitive_data_detected": True,
+            "sensitive_data_detected": len(detected_entities) > 0,
             "detected_entities": detected_entities,
             "actions_taken": actions_taken,
             "blocked": blocked,
-            "alert_created": alert_created
+            "alert_created": alert_created,
+            "policies_matched": len(matching_policies) > 0,
+            "applied_policies": applied_policies
         }
     
     async def _create_alert(self, policy: Policy, detected_entities: List[Dict],
@@ -196,7 +251,7 @@ class PolicyService:
             severity = severity_map.get(policy.severity, AlertSeverity.MEDIUM)
             
             alert = Alert(
-                title=f"Sensitive data detected - Policy: {policy.name}",
+                title=policy.name,  # Use policy name as title
                 description=f"Detected {len(detected_entities)} sensitive entities",
                 severity=severity,
                 status=AlertStatus.PENDING,

@@ -10,6 +10,7 @@ from app.database_mongo import init_mongodb, close_mongodb
 from app.api.routes import analysis, policies, alerts, monitoring
 from app.api.routes import email_receiver, auth, users
 from app.middleware.mongodb_check import MongoDBCheckMiddleware
+from app.middleware.file_scanner import FileScannerMiddleware
 import logging
 import os
 
@@ -57,6 +58,9 @@ app.add_middleware(
 
 # MongoDB check middleware (after CORS)
 app.add_middleware(MongoDBCheckMiddleware)
+
+# File scanner middleware (after MongoDB check)
+app.add_middleware(FileScannerMiddleware)
 
 # Include routers
 app.include_router(auth.router)
@@ -121,7 +125,7 @@ async def startup_event():
         if is_initialized():
             from app.models_mongo.users import User, UserRole, UserStatus
             from app.services.auth_service import get_password_hash
-            from datetime import datetime
+            from app.utils.datetime_utils import get_current_time
             
             try:
                 admin = await User.find_one({"role": UserRole.ADMIN.value})
@@ -136,7 +140,7 @@ async def startup_event():
                         role=UserRole.ADMIN,
                         status=UserStatus.ACTIVE,
                         is_active=True,
-                        approved_at=datetime.utcnow()
+                        approved_at=get_current_time()
                     )
                     await admin_user.insert()
                     logger.info("Default admin created: username=admin, password=admin123")
@@ -216,7 +220,7 @@ async def root():
 async def health_check():
     """Health check endpoint"""
     from app.database_mongo import is_initialized, client
-    from datetime import datetime
+    from app.utils.datetime_utils import get_current_time
     
     mongodb_status = "connected" if is_initialized() else "disconnected"
     status = "healthy" if is_initialized() else "degraded"
@@ -228,6 +232,6 @@ async def health_check():
             "initialized": is_initialized(),
             "message": "MongoDB is connected and ready" if is_initialized() else "MongoDB is not connected. Please start MongoDB service."
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": get_current_time().isoformat()
     }
 

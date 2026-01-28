@@ -101,12 +101,61 @@ echo "Ensuring authentication packages are installed..."
 # Change to backend directory
 cd "$BACKEND_PATH"
 
+# Get local IP address (skip loopback and APIPA addresses)
+LOCAL_IP=""
+# Try hostname -I first, prefer IPs starting with 172, 192, or 10
+if command -v hostname > /dev/null; then
+    # First try to find preferred IPs (172, 192, 10)
+    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{
+        for(i=1;i<=NF;i++){
+            ip=$i
+            if(ip ~ /^172\./ || ip ~ /^192\./ || ip ~ /^10\./){
+                if(ip !~ /^127\./ && ip !~ /^169\.254\./){
+                    print ip
+                    exit
+                }
+            }
+        }
+    }')
+    # If no preferred IP found, get any valid IP
+    if [ -z "$LOCAL_IP" ]; then
+        LOCAL_IP=$(hostname -I 2>/dev/null | awk '{
+            for(i=1;i<=NF;i++){
+                ip=$i
+                if(ip !~ /^127\./ && ip !~ /^169\.254\./){
+                    print ip
+                    exit
+                }
+            }
+        }')
+    fi
+fi
+# Try ip route if still empty
+if [ -z "$LOCAL_IP" ]; then
+    LOCAL_IP=$(ip route get 8.8.8.8 2>/dev/null | awk '{print $7; exit}' | grep -v "^127\." | grep -v "^169\.254\.")
+fi
+# Try ifconfig if still empty
+if [ -z "$LOCAL_IP" ]; then
+    # Prefer IPs starting with 172, 192, or 10
+    LOCAL_IP=$(ifconfig 2>/dev/null | grep -oP 'inet \K[\d.]+' | grep -E "^(172|192|10)\." | grep -v "^127\." | grep -v "^169\.254\." | head -1)
+    # If no preferred IP found, get any valid IP
+    if [ -z "$LOCAL_IP" ]; then
+        LOCAL_IP=$(ifconfig 2>/dev/null | grep -oP 'inet \K[\d.]+' | grep -v "^127\." | grep -v "^169\.254\." | head -1)
+    fi
+fi
+# Fallback to 127.0.0.1 if still empty
+if [ -z "$LOCAL_IP" ]; then
+    LOCAL_IP="127.0.0.1"
+fi
+
 echo ""
 echo "========================================"
 echo "Starting server..."
 echo "Server will be available at:"
-echo "  http://127.0.0.1:8000"
-echo "  http://localhost:8000"
+echo "  Local: http://127.0.0.1:8000"
+echo "  Network: http://$LOCAL_IP:8000"
+echo ""
+echo "Note: Server is accessible from other devices on the network"
 echo "========================================"
 echo ""
 
@@ -124,8 +173,9 @@ fi
 
 # Start the server
 echo "Starting uvicorn server..."
+echo "Server listening on all interfaces (0.0.0.0:8000)"
 echo "Press Ctrl+C to stop the server"
 echo ""
 
-"$PYTHON_CMD" -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+"$PYTHON_CMD" -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 

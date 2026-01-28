@@ -1,9 +1,13 @@
 """
 Schemas for user management and authentication
 """
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
+from app.utils.validators import (
+    sanitize_input, encode_special_chars, 
+    validate_password_strength, validate_email_format
+)
 try:
     from app.models_mongo.users import UserRole, UserStatus
 except ImportError:
@@ -14,11 +18,56 @@ class UserBase(BaseModel):
     """Base user schema"""
     username: str = Field(..., min_length=3, max_length=100)
     email: EmailStr
+    
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        """Validate and sanitize username"""
+        if not v:
+            raise ValueError("Username is required")
+        
+        # Sanitize input
+        sanitized = sanitize_input(v)
+        if sanitized != v:
+            raise ValueError("Username contains invalid characters or scripts")
+        
+        # Encode special characters
+        encoded = encode_special_chars(sanitized)
+        
+        return encoded
+    
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        """Validate email format"""
+        is_valid, error_msg = validate_email_format(v)
+        if not is_valid:
+            raise ValueError(error_msg)
+        return v
 
 
 class UserCreate(UserBase):
     """Schema for creating a new user"""
-    password: str = Field(..., min_length=6, max_length=100)
+    password: str = Field(..., min_length=12, max_length=100)
+    
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        """Validate password strength"""
+        if not v:
+            raise ValueError("Password is required")
+        
+        # Sanitize input
+        sanitized = sanitize_input(v)
+        if sanitized != v:
+            raise ValueError("Password contains invalid characters or scripts")
+        
+        # Validate password strength
+        is_valid, error_msg = validate_password_strength(sanitized)
+        if not is_valid:
+            raise ValueError(error_msg)
+        
+        return sanitized
 
 
 class UserRegister(UserCreate):
@@ -62,6 +111,34 @@ class LoginRequest(BaseModel):
     """Schema for login request"""
     username: str
     password: str
+    
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        """Validate and sanitize username"""
+        if not v:
+            raise ValueError("Username is required")
+        
+        # Sanitize input
+        sanitized = sanitize_input(v)
+        if sanitized != v:
+            raise ValueError("Username contains invalid characters or scripts")
+        
+        return sanitized
+    
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        """Sanitize password input"""
+        if not v:
+            raise ValueError("Password is required")
+        
+        # Sanitize input
+        sanitized = sanitize_input(v)
+        if sanitized != v:
+            raise ValueError("Password contains invalid characters or scripts")
+        
+        return sanitized
 
 
 class TokenResponse(BaseModel):

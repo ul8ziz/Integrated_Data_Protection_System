@@ -4,6 +4,7 @@ Schemas for text analysis API
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
+from app.utils.datetime_utils import get_current_time
 
 
 class DetectedEntitySchema(BaseModel):
@@ -28,6 +29,17 @@ class AnalysisRequest(BaseModel):
     apply_policies: bool = Field(True, description="Whether to apply policies automatically")
 
 
+class AppliedPolicySchema(BaseModel):
+    """Schema for applied policy information"""
+    id: str
+    name: str
+    action: str
+    severity: str
+    entity_types: List[str]
+    matched_entities: List[str]
+    matched_count: int
+
+
 class AnalysisResponse(BaseModel):
     """Response schema for text analysis"""
     sensitive_data_detected: bool
@@ -35,7 +47,9 @@ class AnalysisResponse(BaseModel):
     actions_taken: List[str] = []
     blocked: bool = False
     alert_created: bool = False
-    timestamp: datetime = Field(default_factory=datetime.now)
+    policies_matched: bool = False
+    applied_policies: List[AppliedPolicySchema] = []
+    timestamp: datetime = Field(default_factory=get_current_time)
     
     class Config:
         from_attributes = True

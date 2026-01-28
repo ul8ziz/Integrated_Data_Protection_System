@@ -4,6 +4,7 @@ API routes for authentication - MongoDB version
 from fastapi import APIRouter, Depends, HTTPException, status
 from datetime import datetime
 import logging
+from app.utils.datetime_utils import get_current_time
 from app.models_mongo.users import User, UserRole, UserStatus
 from app.schemas.users import (
     LoginRequest, TokenResponse, UserRegister, UserResponse
@@ -12,6 +13,7 @@ from app.services.auth_service import (
     verify_password, get_password_hash, create_access_token
 )
 from app.api.dependencies import get_current_user
+from app.utils.validators import sanitize_input, encode_special_chars
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +29,38 @@ async def register(
     
     The account will be created with status "pending" and will require
     admin approval before the user can login.
+    
+    Inputs are automatically sanitized to prevent script injection.
     """
+    # Additional sanitization (schemas already validate, but double-check for security)
+    sanitized_username = sanitize_input(user_data.username)
+    sanitized_email = sanitize_input(user_data.email)
+    sanitized_password = sanitize_input(user_data.password)
+    
+    # Check if sanitization removed dangerous content
+    if sanitized_username != user_data.username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username contains invalid characters or scripts"
+        )
+    
+    if sanitized_email != user_data.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email contains invalid characters or scripts"
+        )
+    
+    if sanitized_password != user_data.password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password contains invalid characters or scripts"
+        )
+    
+    # Encode special characters
+    encoded_username = encode_special_chars(sanitized_username)
+    
     # Check if username already exists
-    existing_user = await User.find_one({"username": user_data.username})
+    existing_user = await User.find_one({"username": encoded_username})
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -37,7 +68,7 @@ async def register(
         )
     
     # Check if email already exists
-    existing_email = await User.find_one({"email": user_data.email})
+    existing_email = await User.find_one({"email": sanitized_email})
     if existing_email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -45,10 +76,10 @@ async def register(
         )
     
     # Create new user
-    hashed_password = get_password_hash(user_data.password)
+    hashed_password = get_password_hash(sanitized_password)
     new_user = User(
-        username=user_data.username,
-        email=user_data.email,
+        username=encoded_username,
+        email=sanitized_email,
         hashed_password=hashed_password,
         role=UserRole.REGULAR,
         status=UserStatus.PENDING,
@@ -80,13 +111,36 @@ async def login(
     Login and get access token
     
     Only approved and active users can login.
+    Inputs are automatically sanitized to prevent script injection.
     """
-    logger.info(f"Login attempt for username: {login_data.username}")
+    # Additional sanitization (schemas already validate, but double-check for security)
+    sanitized_username = sanitize_input(login_data.username)
+    sanitized_password = sanitize_input(login_data.password)
+    
+    # Check if sanitization removed dangerous content
+    if sanitized_username != login_data.username:
+        logger.warning(f"Login attempt with dangerous username content: {login_data.username[:20]}...")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username contains invalid characters or scripts"
+        )
+    
+    if sanitized_password != login_data.password:
+        logger.warning(f"Login attempt with dangerous password content")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password contains invalid characters or scripts"
+        )
+    
+    # Encode special characters for username lookup
+    encoded_username = encode_special_chars(sanitized_username)
+    
+    logger.info(f"Login attempt for username: {encoded_username}")
     try:
         # Find user by username or email
-        user = await User.find_one({"username": login_data.username})
+        user = await User.find_one({"username": encoded_username})
         if not user:
-            user = await User.find_one({"email": login_data.username})
+            user = await User.find_one({"email": sanitized_username})
         
         logger.info(f"User found: {user is not None}")
         
@@ -142,7 +196,7 @@ async def login(
         logger.info(f"User can login: {user.username}")
         
         # Update last login
-        user.last_login = datetime.utcnow()
+        user.last_login = get_current_time()
         await user.save()
         
         # Create access token

@@ -2,24 +2,32 @@
 API routes for alerts management - MongoDB version
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from app.schemas.alerts import AlertResponse, AlertUpdate
 from app.models_mongo.alerts import Alert, AlertStatus, AlertSeverity
+from app.models_mongo.policies import Policy
 from app.api.dependencies import get_current_admin
 
 router = APIRouter(prefix="/api/alerts", tags=["Alerts"])
 
 
-@router.get("/", response_model=List[AlertResponse])
+@router.get("/", response_model=Dict[str, Any])
 async def get_alerts(
     status: Optional[str] = Query(None),
     severity: Optional[str] = Query(None),
-    limit: int = Query(100, le=1000),
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
     current_user = Depends(get_current_admin)  # Admin only
 ):
     """
-    Get all alerts, optionally filtered by status and severity
+    Get all alerts with pagination, optionally filtered by status and severity
+    
+    Query parameters:
+    - status: Filter by status
+    - severity: Filter by severity
+    - page: Page number (default: 1)
+    - limit: Items per page (default: 10, max: 100)
     """
     try:
         query = {}
@@ -38,18 +46,43 @@ async def get_alerts(
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"Invalid severity: {severity}")
         
+        # Calculate pagination
+        skip = (page - 1) * limit
+        
+        # Get total count
         if query:
-            alerts = await Alert.find(query).sort("-created_at").limit(limit).to_list()
+            total_count = await Alert.find(query).count()
+            alerts = await Alert.find(query).sort("-created_at").skip(skip).limit(limit).to_list()
         else:
-            alerts = await Alert.find({}).sort("-created_at").limit(limit).to_list()
+            total_count = await Alert.find({}).count()
+            alerts = await Alert.find({}).sort("-created_at").skip(skip).limit(limit).to_list()
         
         # Convert alerts to response format
         result = []
         for alert in alerts:
             try:
+                # Get policy name if policy_id exists
+                policy_name = None
+                if alert.policy_id:
+                    try:
+                        from beanie import PydanticObjectId
+                        policy = await Policy.get(PydanticObjectId(alert.policy_id))
+                        if policy and not policy.is_deleted:
+                            policy_name = policy.name
+                    except Exception:
+                        # Policy not found or deleted, policy_name will remain None
+                        pass
+                
+                # Clean up title - remove policy name from title if it exists
+                clean_title = alert.title
+                if policy_name and f"Policy: {policy_name}" in clean_title:
+                    clean_title = clean_title.replace(f"Policy: {policy_name}", "").replace(" - ", "").strip()
+                    if clean_title.endswith("-"):
+                        clean_title = clean_title[:-1].strip()
+                
                 result.append(AlertResponse(
                     id=str(alert.id),
-                    title=alert.title,
+                    title=clean_title,
                     description=alert.description,
                     severity=alert.severity.value if alert.severity else "medium",
                     status=alert.status.value if alert.status else "pending",
@@ -58,6 +91,7 @@ async def get_alerts(
                     source_device=alert.source_device,
                     detected_entities=alert.detected_entities if alert.detected_entities else [],
                     policy_id=str(alert.policy_id) if alert.policy_id else None,
+                    policy_name=policy_name,  # Include policy name from database
                     action_taken=alert.action_taken,
                     blocked=alert.blocked if alert.blocked is not None else False,
                     created_at=alert.created_at,
@@ -70,7 +104,18 @@ async def get_alerts(
                 logging.getLogger(__name__).error(f"Error processing alert {alert.id}: {e}")
                 continue
         
-        return result
+        # Calculate pagination metadata
+        total_pages = (total_count + limit - 1) // limit if total_count > 0 else 0
+        
+        return {
+            "items": result,
+            "total": total_count,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages,
+            "has_next": page < total_pages,
+            "has_prev": page > 1
+        }
         
     except HTTPException:
         raise
@@ -93,6 +138,18 @@ async def get_alert(
     except Exception:
         raise HTTPException(status_code=404, detail="Alert not found")
     
+    # Get policy name if policy_id exists
+    policy_name = None
+    if alert.policy_id:
+        try:
+            from beanie import PydanticObjectId
+            policy = await Policy.get(PydanticObjectId(alert.policy_id))
+            if policy and not policy.is_deleted:
+                policy_name = policy.name
+        except Exception:
+            pass
+    
+    # Title is now the policy name directly, no need to clean
     return AlertResponse(
         id=str(alert.id),
         title=alert.title,
@@ -104,6 +161,7 @@ async def get_alert(
         source_device=alert.source_device,
         detected_entities=alert.detected_entities if alert.detected_entities else [],
         policy_id=str(alert.policy_id) if alert.policy_id else None,
+        policy_name=policy_name,
         action_taken=alert.action_taken,
         blocked=alert.blocked if alert.blocked is not None else False,
         created_at=alert.created_at,
@@ -131,7 +189,8 @@ async def update_alert(
             try:
                 alert.status = AlertStatus(alert_update.status)
                 if alert.status in [AlertStatus.RESOLVED, AlertStatus.FALSE_POSITIVE]:
-                    alert.resolved_at = datetime.utcnow()
+                    from app.utils.datetime_utils import get_current_time
+                    alert.resolved_at = get_current_time()
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"Invalid status: {alert_update.status}")
         
@@ -140,6 +199,18 @@ async def update_alert(
         
         await alert.save()
         
+        # Get policy name if policy_id exists
+        policy_name = None
+        if alert.policy_id:
+            try:
+                from beanie import PydanticObjectId
+                policy = await Policy.get(PydanticObjectId(alert.policy_id))
+                if policy and not policy.is_deleted:
+                    policy_name = policy.name
+            except Exception:
+                pass
+        
+        # Title is now the policy name directly, no need to clean
         return AlertResponse(
             id=str(alert.id),
             title=alert.title,
@@ -151,6 +222,7 @@ async def update_alert(
             source_device=alert.source_device,
             detected_entities=alert.detected_entities if alert.detected_entities else [],
             policy_id=str(alert.policy_id) if alert.policy_id else None,
+            policy_name=policy_name,
             action_taken=alert.action_taken,
             blocked=alert.blocked if alert.blocked is not None else False,
             created_at=alert.created_at,

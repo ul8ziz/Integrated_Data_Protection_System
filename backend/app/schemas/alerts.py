@@ -17,7 +17,8 @@ class AlertResponse(BaseModel):
     source_user: Optional[str]
     source_device: Optional[str]
     detected_entities: Optional[List[Dict[str, Any]]]
-    policy_id: Optional[str]  # MongoDB uses ObjectId (string)
+    policy_id: Optional[str] = None  # MongoDB uses ObjectId (string)
+    policy_name: Optional[str] = None  # Policy name from database (if policy exists)
     action_taken: Optional[str]
     blocked: bool
     created_at: datetime

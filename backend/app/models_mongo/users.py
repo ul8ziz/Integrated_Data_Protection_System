@@ -6,6 +6,7 @@ from pydantic import Field, EmailStr
 from typing import Optional
 from datetime import datetime
 from enum import Enum
+from app.utils.datetime_utils import get_current_time
 
 
 class UserRole(str, Enum):
@@ -40,7 +41,7 @@ class User(Document):
     rejection_reason: Optional[str] = None
     
     # Metadata
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_current_time)
     last_login: Optional[datetime] = None
     
     class Settings:

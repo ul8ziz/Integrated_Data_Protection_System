@@ -9,6 +9,7 @@ from app.services.mydlp_service import MyDLPService
 from app.models_mongo.logs import Log, DetectedEntity
 from app.models_mongo.alerts import Alert, AlertSeverity, AlertStatus
 from datetime import datetime
+from app.utils.datetime_utils import get_current_time
 
 logger = logging.getLogger(__name__)
 
@@ -88,34 +89,40 @@ class EmailMonitoringService:
                 source_device="email_client"
             )
             
-            # Determine action
+            # Determine action based on policy result
+            # Only take action if policies matched
+            if not policy_result.get("policies_matched", False):
+                # No policies matched - allow email and don't create alerts
+                logger.info(f"Email from {from_email} allowed - no matching policies for detected entities")
+                return {
+                    "sensitive_data_detected": True,
+                    "detected_entities": detected_entities,
+                    "action": "allow",
+                    "blocked": False,
+                    "alert_created": False,
+                    "message": f"Email allowed - {len(detected_entities)} entities detected but no matching policies"
+                }
+            
             action = "block" if policy_result.get("blocked", False) else "alert" if policy_result.get("alert_created", False) else "allow"
             
             # If blocked, notify MyDLP
             if action == "block":
                 self.mydlp.block_email(
-                    email_id=f"{from_email}_{datetime.now().isoformat()}",
+                    email_id=f"{from_email}_{get_current_time().isoformat()}",
                     reason=f"Policy violation: {len(detected_entities)} sensitive entities detected"
                 )
                 
-                # Create alert
-                await self._create_email_alert(
-                    from_email=from_email,
-                    to_emails=to_emails,
-                    subject=subject,
-                    detected_entities=detected_entities,
-                    source_ip=source_ip,
-                    source_user=source_user,
-                    blocked=True
-                )
+                # Alert is already created by policy_service, no need to create another one
+                logger.info(f"Email blocked by policy - alert already created by policy service")
             
-            # Store detected entities
-            for entity in detected_entities:
-                await self._store_detected_entity(
-                    entity=entity,
-                    source_text_hash=self.policy_service.encryption.hash_text(full_text),
-                    source_file=f"email_{from_email}_{datetime.now().timestamp()}"
-                )
+            # Store detected entities only if policies matched
+            if policy_result.get("policies_matched", False):
+                for entity in detected_entities:
+                    await self._store_detected_entity(
+                        entity=entity,
+                        source_text_hash=self.policy_service.encryption.hash_text(full_text),
+                        source_file=f"email_{from_email}_{get_current_time().timestamp()}"
+                    )
             
             return {
                 "sensitive_data_detected": True,
@@ -221,7 +228,7 @@ class EmailMonitoringService:
         """
         try:
             from datetime import timedelta
-            start_date = datetime.now() - timedelta(days=days)
+            start_date = get_current_time() - timedelta(days=days)
             
             # Count email events
             email_logs = await Log.find({

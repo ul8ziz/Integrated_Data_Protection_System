@@ -1,9 +1,10 @@
 """
 API routes for monitoring and reports
 """
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from typing import Dict, Any
 from datetime import datetime, timedelta
+from app.utils.datetime_utils import get_current_time
 from app.models_mongo.logs import Log, DetectedEntity
 from app.models_mongo.alerts import Alert
 from app.models_mongo.policies import Policy
@@ -71,7 +72,7 @@ async def get_system_status(
             "status": "operational" if mydlp_enabled else "disabled",
             "is_localhost": current_mydlp.is_local() if mydlp_enabled else False
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": get_current_time().isoformat()
     }
 
 
@@ -101,7 +102,7 @@ async def get_summary_report(
     Get summary report for the last N days
     """
     try:
-        start_date = datetime.now() - timedelta(days=days)
+        start_date = get_current_time() - timedelta(days=days)
         
         # Count logs
         total_logs = await Log.find({"created_at": {"$gte": start_date}}).count()
@@ -129,7 +130,7 @@ async def get_summary_report(
         return {
             "period_days": days,
             "start_date": start_date.isoformat(),
-            "end_date": datetime.now().isoformat(),
+            "end_date": get_current_time().isoformat(),
             "summary": {
                 "total_logs": total_logs,
                 "total_detected_entities": total_entities,
@@ -148,11 +149,18 @@ async def get_summary_report(
 async def get_logs_report(
     event_type: str = None,
     level: str = None,
-    limit: int = 100,
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
     current_user = Depends(get_current_admin)  # Admin only
 ):
     """
-    Get logs report
+    Get logs report with pagination
+    
+    Query parameters:
+    - event_type: Filter by event type
+    - level: Filter by log level
+    - page: Page number (default: 1)
+    - limit: Items per page (default: 10, max: 100)
     """
     try:
         query = {}
@@ -161,14 +169,22 @@ async def get_logs_report(
         if level:
             query["level"] = level
         
+        # Calculate pagination
+        skip = (page - 1) * limit
+        
+        # Get total count
         if query:
-            logs = await Log.find(query).sort("-created_at").limit(limit).to_list()
+            total_count = await Log.find(query).count()
+            logs = await Log.find(query).sort("-created_at").skip(skip).limit(limit).to_list()
         else:
-            logs = await Log.find({}).sort("-created_at").limit(limit).to_list()
+            total_count = await Log.find({}).count()
+            logs = await Log.find({}).sort("-created_at").skip(skip).limit(limit).to_list()
+        
+        # Calculate pagination metadata
+        total_pages = (total_count + limit - 1) // limit if total_count > 0 else 0
         
         return {
-            "count": len(logs),
-            "logs": [
+            "items": [
                 {
                     "id": str(log.id),
                     "event_type": log.event_type,
@@ -180,7 +196,13 @@ async def get_logs_report(
                     "metadata": log.extra_data
                 }
                 for log in logs
-            ]
+            ],
+            "total": total_count,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages,
+            "has_next": page < total_pages,
+            "has_prev": page > 1
         }
         
     except Exception as e:
@@ -266,4 +288,133 @@ async def get_email_logs(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching email logs: {str(e)}")
+
+
+@router.get("/user-activities/{user_id}")
+async def get_user_activities(
+    user_id: str,
+    days: int = 30,
+    current_user = Depends(get_current_admin)  # Admin only
+):
+    """
+    Get all activities for a specific user
+    
+    Returns:
+    - All operations performed by the user
+    - Files analyzed by the user
+    - Files sent over network by the user
+    - Detailed information for each operation
+    """
+    try:
+        from datetime import datetime, timedelta
+        from app.models_mongo.users import User
+        
+        # Verify user exists
+        user = await User.get(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        start_date = get_current_time() - timedelta(days=days)
+        
+        # Get all logs for this user
+        user_logs = await Log.find({
+            "source_user": user.username,
+            "created_at": {"$gte": start_date}
+        }).sort("-created_at").to_list()
+        
+        # Get all detected entities for this user (from files they analyzed)
+        user_entities = await DetectedEntity.find({
+            "created_at": {"$gte": start_date}
+        }).to_list()
+        
+        # Filter entities by checking logs for file operations
+        file_operations = []
+        network_operations = []
+        analysis_operations = []
+        
+        for log in user_logs:
+            operation = {
+                "id": str(log.id),
+                "event_type": log.event_type,
+                "message": log.message,
+                "level": log.level,
+                "timestamp": log.created_at.isoformat(),
+                "source_ip": log.source_ip,
+                "user_agent": log.user_agent,
+                "metadata": log.extra_data or {}
+            }
+            
+            # Add file information if available
+            if log.file_name:
+                operation["file_name"] = log.file_name
+                operation["file_size"] = log.file_size
+                operation["file_type"] = log.file_type
+                file_operations.append(operation)
+            
+            # Add network information if available
+            if log.network_destination:
+                operation["network_destination"] = log.network_destination
+                operation["network_protocol"] = log.network_protocol
+                network_operations.append(operation)
+            
+            # Analysis operations
+            if log.event_type in ["analysis", "policy_applied", "file_analyzed"]:
+                analysis_operations.append(operation)
+        
+        # Get unique file names
+        unique_files = list(set([
+            log.file_name for log in user_logs 
+            if log.file_name
+        ]))
+        
+        # Get network destinations
+        unique_destinations = list(set([
+            log.network_destination for log in user_logs 
+            if log.network_destination
+        ]))
+        
+        return {
+            "user_id": str(user.id),
+            "username": user.username,
+            "email": user.email,
+            "period_days": days,
+            "start_date": start_date.isoformat(),
+            "end_date": get_current_time().isoformat(),
+            "summary": {
+                "total_operations": len(user_logs),
+                "file_operations": len(file_operations),
+                "network_operations": len(network_operations),
+                "analysis_operations": len(analysis_operations),
+                "unique_files_analyzed": len(unique_files),
+                "unique_network_destinations": len(unique_destinations)
+            },
+            "files_analyzed": unique_files,
+            "network_destinations": unique_destinations,
+            "operations": {
+                "all": [
+                    {
+                        "id": str(log.id),
+                        "event_type": log.event_type,
+                        "message": log.message,
+                        "timestamp": log.created_at.isoformat(),
+                        "source_ip": log.source_ip,
+                        "file_name": log.file_name,
+                        "network_destination": log.network_destination,
+                        "metadata": log.extra_data or {}
+                    }
+                    for log in user_logs
+                ],
+                "file_operations": file_operations,
+                "network_operations": network_operations,
+                "analysis_operations": analysis_operations
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching user activities: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error fetching user activities: {str(e)}")
 

@@ -5,6 +5,7 @@ from beanie import Document
 from pydantic import Field
 from typing import List, Optional
 from datetime import datetime
+from app.utils.datetime_utils import get_current_time
 
 
 class Policy(Document):
@@ -29,15 +30,17 @@ class Policy(Document):
     hipaa_compliant: bool = Field(default=False)
     
     # Metadata
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_current_time)
     updated_at: Optional[datetime] = None
     created_by: Optional[str] = None
+    is_deleted: bool = Field(default=False)  # Soft delete flag
     
     class Settings:
         name = "policies"  # Collection name
         indexes = [
             "name",
-            "enabled"
+            "enabled",
+            "is_deleted"
         ]
     
     def __repr__(self):

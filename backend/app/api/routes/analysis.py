@@ -6,11 +6,12 @@ from typing import List, Optional
 import tempfile
 import os
 import logging
-from app.schemas.analysis import AnalysisRequest, AnalysisResponse, DetectedEntitySchema
+from app.schemas.analysis import AnalysisRequest, AnalysisResponse, DetectedEntitySchema, AppliedPolicySchema
 from app.services.policy_service import PolicyService
 from app.services.presidio_service import PresidioService
 from app.services.file_extractor_service import FileTextExtractor
 from app.api.dependencies import get_optional_user
+from app.models_mongo.logs import Log
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +59,20 @@ async def analyze_text(
                 for entity in result.get("detected_entities", [])
             ]
             
+            # Convert applied policies
+            applied_policies = [
+                AppliedPolicySchema(**policy)
+                for policy in result.get("applied_policies", [])
+            ]
+            
             return AnalysisResponse(
                 sensitive_data_detected=result["sensitive_data_detected"],
                 detected_entities=detected_entities,
                 actions_taken=result["actions_taken"],
                 blocked=result["blocked"],
-                alert_created=result.get("alert_created", False)
+                alert_created=result.get("alert_created", False),
+                policies_matched=result.get("policies_matched", False),
+                applied_policies=applied_policies
             )
         else:
             # Only analyze without applying policies
@@ -77,7 +86,9 @@ async def analyze_text(
                 detected_entities=[DetectedEntitySchema(**e) for e in detected_entities],
                 actions_taken=[],
                 blocked=False,
-                alert_created=False
+                alert_created=False,
+                policies_matched=False,
+                applied_policies=[]
             )
             
     except Exception as e:
@@ -143,6 +154,31 @@ async def analyze_file(
         # Use current user if logged in and source_user not provided
         final_source_user = source_user or (current_user.username if current_user else None)
         
+        # Get client IP if not provided
+        if not source_ip and http_request:
+            source_ip = http_request.client.host if http_request.client else None
+        
+        # Log file analysis operation
+        try:
+            file_log = Log(
+                event_type="file_analyzed",
+                message=f"File analyzed: {file.filename}",
+                level="INFO",
+                source_ip=source_ip,
+                source_user=final_source_user,
+                file_name=file.filename,
+                file_size=len(file_content),
+                file_type=os.path.splitext(file.filename)[1] if file.filename else None,
+                extra_data={
+                    "filename": file.filename,
+                    "file_size": len(file_content),
+                    "apply_policies": apply_policies
+                }
+            )
+            await file_log.insert()
+        except Exception as e:
+            logger.warning(f"Failed to log file operation: {e}")
+        
         # Analyze extracted text
         if apply_policies:
             # Apply policies (includes Presidio analysis)
@@ -159,12 +195,20 @@ async def analyze_file(
                 for entity in result.get("detected_entities", [])
             ]
             
+            # Convert applied policies
+            applied_policies = [
+                AppliedPolicySchema(**policy)
+                for policy in result.get("applied_policies", [])
+            ]
+            
             return AnalysisResponse(
                 sensitive_data_detected=result["sensitive_data_detected"],
                 detected_entities=detected_entities,
                 actions_taken=result["actions_taken"],
                 blocked=result["blocked"],
-                alert_created=result.get("alert_created", False)
+                alert_created=result.get("alert_created", False),
+                policies_matched=result.get("policies_matched", False),
+                applied_policies=applied_policies
             )
         else:
             # Only analyze without applying policies

@@ -361,15 +361,77 @@
                             <textarea id="policyDescription" rows="3" placeholder="Policy description..."></textarea>
                         </div>
                         <div class="form-group">
-                            <label>Entity Types</label>
-                            <select id="policyEntities" multiple required>
-                                <option value="PERSON">Person</option>
-                                <option value="PHONE_NUMBER">Phone Number</option>
-                                <option value="EMAIL_ADDRESS">Email Address</option>
-                                <option value="CREDIT_CARD">Credit Card</option>
-                                <option value="ADDRESS">Address</option>
-                                <option value="ORGANIZATION">Organization</option>
-                            </select>
+                            <label style="margin-bottom: 12px; display: block; font-weight: 600; color: var(--dark);">
+                                Entity Types
+                                <span style="color: var(--gray); font-size: 0.875rem; font-weight: 400; margin-left: 6px;">(اختر نوع أو أكثر من أنواع البيانات الحساسة)</span>
+                            </label>
+                            <div id="entityTypesContainer" class="entity-types-container">
+                                <div class="entity-types-grid">
+                                    <label class="entity-type-checkbox">
+                                        <input type="checkbox" value="PERSON" name="policyEntities">
+                                        <span class="checkbox-custom"></span>
+                                        <span class="checkbox-label">Person</span>
+                                    </label>
+                                    <label class="entity-type-checkbox">
+                                        <input type="checkbox" value="PHONE_NUMBER" name="policyEntities">
+                                        <span class="checkbox-custom"></span>
+                                        <span class="checkbox-label">Phone Number</span>
+                                    </label>
+                                    <label class="entity-type-checkbox">
+                                        <input type="checkbox" value="EMAIL_ADDRESS" name="policyEntities">
+                                        <span class="checkbox-custom"></span>
+                                        <span class="checkbox-label">Email Address</span>
+                                    </label>
+                                    <label class="entity-type-checkbox">
+                                        <input type="checkbox" value="CREDIT_CARD" name="policyEntities">
+                                        <span class="checkbox-custom"></span>
+                                        <span class="checkbox-label">Credit Card</span>
+                                    </label>
+                                    <label class="entity-type-checkbox">
+                                        <input type="checkbox" value="ADDRESS" name="policyEntities">
+                                        <span class="checkbox-custom"></span>
+                                        <span class="checkbox-label">Address</span>
+                                    </label>
+                                    <label class="entity-type-checkbox">
+                                        <input type="checkbox" value="ORGANIZATION" name="policyEntities">
+                                        <span class="checkbox-custom"></span>
+                                        <span class="checkbox-label">Organization</span>
+                                    </label>
+                                    <label class="entity-type-checkbox">
+                                        <input type="checkbox" value="DATE_TIME" name="policyEntities">
+                                        <span class="checkbox-custom"></span>
+                                        <span class="checkbox-label">Date/Time</span>
+                                    </label>
+                                    <label class="entity-type-checkbox">
+                                        <input type="checkbox" value="LOCATION" name="policyEntities">
+                                        <span class="checkbox-custom"></span>
+                                        <span class="checkbox-label">Location</span>
+                                    </label>
+                                    <label class="entity-type-checkbox">
+                                        <input type="checkbox" value="IBAN_CODE" name="policyEntities">
+                                        <span class="checkbox-custom"></span>
+                                        <span class="checkbox-label">IBAN Code</span>
+                                    </label>
+                                    <label class="entity-type-checkbox">
+                                        <input type="checkbox" value="IP_ADDRESS" name="policyEntities">
+                                        <span class="checkbox-custom"></span>
+                                        <span class="checkbox-label">IP Address</span>
+                                    </label>
+                                    <label class="entity-type-checkbox">
+                                        <input type="checkbox" value="US_SSN" name="policyEntities">
+                                        <span class="checkbox-custom"></span>
+                                        <span class="checkbox-label">US SSN</span>
+                                    </label>
+                                    <label class="entity-type-checkbox">
+                                        <input type="checkbox" value="MALICIOUS_SCRIPT" name="policyEntities">
+                                        <span class="checkbox-custom"></span>
+                                        <span class="checkbox-label">Malicious Script</span>
+                                    </label>
+                                </div>
+                                <div id="selectedEntitiesTags" class="selected-entities-tags" style="display: none;">
+                                    <span class="tag-label">Selected:</span>
+                                </div>
+                            </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
@@ -455,7 +517,6 @@
                 </div>
                 
                 <div id="emailStats" class="stats-grid"></div>
-                <div id="emailLogs" class="email-logs-container"></div>
             </div>
             
             <div id="monitoringData" class="monitoring-data admin-only"></div>
@@ -720,7 +781,7 @@ Employee</textarea>
 
             <!-- Sub-tabs for Users -->
             <div class="sub-tabs-container">
-                <button class="sub-tab-btn active" onclick="switchUsersView('all', this)">
+                <button class="sub-tab-btn active" onclick="switchUsersView('all', this); loadUsers(null, 1);">
                     <span>All Users</span>
                 </button>
                 <button class="sub-tab-btn" onclick="switchUsersView('pending', this)">

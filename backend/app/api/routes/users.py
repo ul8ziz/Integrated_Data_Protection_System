@@ -2,9 +2,10 @@
 API routes for user management (Admin only) - MongoDB version
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from beanie import PydanticObjectId
+from app.utils.datetime_utils import get_current_time
 from app.models_mongo.users import User, UserRole, UserStatus
 from app.schemas.users import (
     UserResponse, UserDetailResponse, UserCreate, UserUpdate,
@@ -16,43 +17,97 @@ from app.api.dependencies import get_current_admin
 router = APIRouter(prefix="/api/users", tags=["Users"])
 
 
-@router.get("/", response_model=List[UserDetailResponse])
+@router.get("/", response_model=Dict[str, Any])
 async def get_users(
     status_filter: Optional[UserStatus] = Query(None, alias="status"),
     role_filter: Optional[UserRole] = Query(None, alias="role"),
     search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
     current_user: User = Depends(get_current_admin)
 ):
     """
-    Get all users (Admin only)
+    Get all users with pagination (Admin only)
     
     Query parameters:
     - status: Filter by status (pending, approved, rejected, active)
     - role: Filter by role (regular, admin)
     - search: Search by username or email
+    - page: Page number (default: 1)
+    - limit: Items per page (default: 10, max: 100)
     """
-    query = {}
-    
-    # Apply filters
+    # Handle active users filter specially (needs is_active=True)
     if status_filter:
-        query["status"] = status_filter.value if hasattr(status_filter, 'value') else status_filter
-    
-    if role_filter:
-        query["role"] = role_filter.value if hasattr(role_filter, 'value') else role_filter
-    
-    # Build query
-    if query:
-        users_list = await User.find(query).sort("-created_at").to_list()
+        status_value = status_filter.value if hasattr(status_filter, 'value') else status_filter
+        if status_value == 'active':
+            # For active users: (status=approved OR status=active) AND is_active=True
+            # Get all users and filter in Python since Beanie doesn't support complex $or easily
+            all_users = await User.find({}).sort("-created_at").to_list()
+            filtered_users = [
+                u for u in all_users
+                if u.is_active and (u.status == UserStatus.APPROVED or u.status == UserStatus.ACTIVE)
+            ]
+            # Apply role filter if provided
+            if role_filter:
+                role_value = role_filter.value if hasattr(role_filter, 'value') else role_filter
+                filtered_users = [u for u in filtered_users if u.role.value == role_value]
+            # Apply search filter if provided
+            if search:
+                search_lower = search.lower()
+                filtered_users = [
+                    u for u in filtered_users
+                    if search_lower in u.username.lower() or search_lower in u.email.lower()
+                ]
+            # Calculate pagination
+            total_count = len(filtered_users)
+            skip = (page - 1) * limit
+            users_list = filtered_users[skip:skip + limit]
+        else:
+            # Regular status filter
+            query = {"status": status_value}
+            if role_filter:
+                role_value = role_filter.value if hasattr(role_filter, 'value') else role_filter
+                query["role"] = role_value
+            base_query = User.find(query)
+            # Calculate pagination
+            skip = (page - 1) * limit
+            # Get total count
+            total_count = await base_query.count()
+            # Apply search filter if provided (before pagination)
+            if search:
+                search_lower = search.lower()
+                all_users = await base_query.sort("-created_at").to_list()
+                filtered_users = [
+                    u for u in all_users
+                    if search_lower in u.username.lower() or search_lower in u.email.lower()
+                ]
+                total_count = len(filtered_users)
+                users_list = filtered_users[skip:skip + limit]
+            else:
+                users_list = await base_query.sort("-created_at").skip(skip).limit(limit).to_list()
     else:
-        users_list = await User.find({}).sort("-created_at").to_list()
-    
-    # Apply search filter if provided
-    if search:
-        search_lower = search.lower()
-        users_list = [
-            u for u in users_list
-            if search_lower in u.username.lower() or search_lower in u.email.lower()
-        ]
+        # No status filter
+        query = {}
+        if role_filter:
+            role_value = role_filter.value if hasattr(role_filter, 'value') else role_filter
+            query["role"] = role_value
+        base_query = User.find(query) if query else User.find({})
+        # Calculate pagination
+        skip = (page - 1) * limit
+        # Get total count
+        total_count = await base_query.count()
+        # Apply search filter if provided (before pagination)
+        if search:
+            search_lower = search.lower()
+            all_users = await base_query.sort("-created_at").to_list()
+            filtered_users = [
+                u for u in all_users
+                if search_lower in u.username.lower() or search_lower in u.email.lower()
+            ]
+            total_count = len(filtered_users)
+            users_list = filtered_users[skip:skip + limit]
+        else:
+            users_list = await base_query.sort("-created_at").skip(skip).limit(limit).to_list()
     
     # Convert to response format
     result = []
@@ -71,7 +126,18 @@ async def get_users(
             rejection_reason=user.rejection_reason
         ))
     
-    return result
+    # Calculate pagination metadata
+    total_pages = (total_count + limit - 1) // limit if total_count > 0 else 0
+    
+    return {
+        "items": result,
+        "total": total_count,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages,
+        "has_next": page < total_pages,
+        "has_prev": page > 1
+    }
 
 
 @router.get("/pending", response_model=List[UserDetailResponse])
@@ -171,7 +237,7 @@ async def create_user(
         role=user_data.role if hasattr(user_data, 'role') else UserRole.REGULAR,
         status=UserStatus.APPROVED,  # Auto-approved when created by admin
         is_active=True,
-        approved_at=datetime.utcnow(),
+        approved_at=get_current_time(),
         approved_by=str(current_user.id)
     )
     
@@ -242,7 +308,7 @@ async def update_user(
         if user_data.status in [UserStatus.APPROVED, UserStatus.ACTIVE]:
             user.is_active = True
             if not user.approved_at:
-                user.approved_at = datetime.utcnow()
+                user.approved_at = get_current_time()
                 user.approved_by = str(current_user.id)
         else:
             user.is_active = False
@@ -299,7 +365,7 @@ async def approve_user(
     # Approve user
     user.status = UserStatus.APPROVED
     user.is_active = True
-    user.approved_at = datetime.utcnow()
+    user.approved_at = get_current_time()
     user.approved_by = str(current_user.id)
     user.rejection_reason = None  # Clear any previous rejection reason
     
@@ -367,15 +433,106 @@ async def reject_user(
     )
 
 
+@router.post("/{user_id}/suspend", response_model=UserDetailResponse)
+async def suspend_user(
+    user_id: str,
+    current_user: User = Depends(get_current_admin)
+):
+    """
+    Suspend (deactivate) a user (Admin only)
+    
+    Suspended users cannot login but their account is not deleted.
+    Cannot suspend yourself.
+    """
+    if str(user_id) == str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot suspend your own account"
+        )
+    
+    try:
+        user = await User.get(user_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Suspend user
+    user.is_active = False
+    await user.save()
+    
+    return UserDetailResponse(
+        id=str(user.id),
+        username=user.username,
+        email=user.email,
+        role=user.role,
+        status=user.status,
+        is_active=user.is_active,
+        created_at=user.created_at,
+        approved_at=user.approved_at,
+        last_login=user.last_login,
+        approved_by=str(user.approved_by) if user.approved_by else None,
+        rejection_reason=user.rejection_reason
+    )
+
+
+@router.post("/{user_id}/activate", response_model=UserDetailResponse)
+async def activate_user(
+    user_id: str,
+    current_user: User = Depends(get_current_admin)
+):
+    """
+    Activate a suspended user (Admin only)
+    
+    Activates a previously suspended user, allowing them to login again.
+    """
+    try:
+        user = await User.get(user_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Check if user is approved
+    if user.status not in [UserStatus.APPROVED, UserStatus.ACTIVE]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot activate user with status: {user.status.value}. User must be approved first."
+        )
+    
+    # Activate user
+    user.is_active = True
+    if user.status == UserStatus.APPROVED:
+        user.status = UserStatus.ACTIVE
+    await user.save()
+    
+    return UserDetailResponse(
+        id=str(user.id),
+        username=user.username,
+        email=user.email,
+        role=user.role,
+        status=user.status,
+        is_active=user.is_active,
+        created_at=user.created_at,
+        approved_at=user.approved_at,
+        last_login=user.last_login,
+        approved_by=str(user.approved_by) if user.approved_by else None,
+        rejection_reason=user.rejection_reason
+    )
+
+
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: str,
     current_user: User = Depends(get_current_admin)
 ):
     """
-    Delete a user (Admin only)
+    Permanently delete a user (Admin only)
     
     Cannot delete yourself.
+    WARNING: This action cannot be undone!
     """
     if str(user_id) == str(current_user.id):
         raise HTTPException(
