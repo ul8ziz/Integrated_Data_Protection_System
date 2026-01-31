@@ -8,6 +8,80 @@ const ALERT_SOUND = new Audio("data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAA
 const BEEP_SOUND = "data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU";
 
 // ============================================================================
+// Safe localStorage wrapper - handles access denied errors gracefully
+// ============================================================================
+const safeStorage = {
+    // Check if localStorage is available
+    isAvailable: function() {
+        try {
+            const test = '__localStorage_test__';
+            localStorage.setItem(test, test);
+            localStorage.removeItem(test);
+            return true;
+        } catch (e) {
+            console.warn('localStorage is not available:', e.message);
+            return false;
+        }
+    },
+    
+    // Safe getItem
+    getItem: function(key) {
+        try {
+            if (!this.isAvailable()) {
+                return null;
+            }
+            return localStorage.getItem(key);
+        } catch (e) {
+            console.warn(`Failed to get localStorage item "${key}":`, e.message);
+            return null;
+        }
+    },
+    
+    // Safe setItem
+    setItem: function(key, value) {
+        try {
+            if (!this.isAvailable()) {
+                console.warn('localStorage is not available, cannot save:', key);
+                return false;
+            }
+            localStorage.setItem(key, value);
+            return true;
+        } catch (e) {
+            console.warn(`Failed to set localStorage item "${key}":`, e.message);
+            return false;
+        }
+    },
+    
+    // Safe removeItem
+    removeItem: function(key) {
+        try {
+            if (!this.isAvailable()) {
+                return false;
+            }
+            localStorage.removeItem(key);
+            return true;
+        } catch (e) {
+            console.warn(`Failed to remove localStorage item "${key}":`, e.message);
+            return false;
+        }
+    },
+    
+    // Safe clear
+    clear: function() {
+        try {
+            if (!this.isAvailable()) {
+                return false;
+            }
+            localStorage.clear();
+            return true;
+        } catch (e) {
+            console.warn('Failed to clear localStorage:', e.message);
+            return false;
+        }
+    }
+};
+
+// ============================================================================
 // CRITICAL: Define approve/reject functions IMMEDIATELY at top level
 // These must be available before any HTML is rendered
 // ============================================================================
@@ -744,6 +818,42 @@ function displayAnalysisResult(result, fileName = null) {
             });
             html += `</div>`;
         }
+        
+        // Show encrypted text if encryption was applied
+        if (result.encrypted_text) {
+            // Escape HTML and prepare text for display
+            const escapedText = result.encrypted_text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+            
+            // Prepare text for copy function (escape quotes)
+            const textForCopy = result.encrypted_text
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'")
+                .replace(/"/g, '\\"')
+                .replace(/\n/g, '\\n')
+                .replace(/\r/g, '\\r');
+            
+            html += `<div style="margin-top: 24px; padding: 16px; background: var(--light); border-radius: 8px; border-left: 4px solid var(--success);">
+                <h4 style="margin-top: 0; margin-bottom: 12px; color: var(--dark);">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                    Encrypted Text
+                </h4>
+                <div id="encryptedTextDisplay" style="background: white; padding: 12px; border-radius: 4px; border: 1px solid var(--border); font-family: monospace; word-break: break-all; white-space: pre-wrap; max-height: 300px; overflow-y: auto;">
+                    ${escapedText}
+                </div>
+                <button onclick="copyEncryptedText('${textForCopy}')" 
+                        style="margin-top: 8px; padding: 6px 12px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem;">
+                    Copy Encrypted Text
+                </button>
+            </div>`;
+        }
     } else {
         html += `<div class="alert-banner alert-success">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -755,6 +865,42 @@ function displayAnalysisResult(result, fileName = null) {
     
     resultContent.innerHTML = html;
     resultBox.style.display = 'block';
+}
+
+// Copy to clipboard helper function
+function copyToClipboard(text, successMessage = 'Copied to clipboard!') {
+    try {
+        // Create a temporary textarea element
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        showNotification(successMessage, 'success');
+    } catch (err) {
+        console.error('Failed to copy:', err);
+        showNotification('Failed to copy to clipboard', 'error');
+    }
+}
+
+// Copy encrypted text function (handles escaped text)
+function copyEncryptedText(escapedText) {
+    try {
+        // Unescape the text
+        const unescapedText = escapedText
+            .replace(/\\n/g, '\n')
+            .replace(/\\r/g, '\r')
+            .replace(/\\'/g, "'")
+            .replace(/\\"/g, '"')
+            .replace(/\\\\/g, '\\');
+        copyToClipboard(unescapedText, 'Encrypted text copied to clipboard!');
+    } catch (err) {
+        console.error('Failed to copy encrypted text:', err);
+        showNotification('Failed to copy encrypted text', 'error');
+    }
 }
 
 // Policy functions
@@ -2379,32 +2525,117 @@ async function testEmail(event) {
         let resultHtml = '<div class="email-result">';
         resultHtml += `<h4>Email Analysis Result</h4>`;
         
-        if (result.sensitive_data_detected) {
-            resultHtml += `<div class="alert-banner alert-danger">`;
-            resultHtml += `<strong>⚠️ Sensitive Data Detected!</strong>`;
-            resultHtml += `<p>${result.message}</p>`;
-            resultHtml += `</div>`;
-            
-            if (result.blocked) {
+        // Get analysis result (may be nested in analysis field)
+        const analysis = result.analysis || result;
+        const policiesMatched = analysis.policies_matched || false;
+        const appliedPolicies = analysis.applied_policies || [];
+        const actionsTaken = analysis.actions_taken || [];
+        
+        if (analysis.sensitive_data_detected) {
+            // Show message based on whether policies matched
+            if (policiesMatched && appliedPolicies.length > 0) {
                 resultHtml += `<div class="alert-banner alert-danger">`;
-                resultHtml += `<strong>🚫 Email Blocked</strong>`;
-                resultHtml += `<p>The email was blocked due to policy violation.</p>`;
+                resultHtml += `<strong>⚠️ Sensitive Data Detected - Policies Applied!</strong>`;
+                resultHtml += `<p>${analysis.message || result.message || 'Sensitive data detected and policies applied'}</p>`;
+                resultHtml += `</div>`;
+            } else {
+                resultHtml += `<div class="alert-banner alert-info">`;
+                resultHtml += `<strong>⚠️ Sensitive Data Detected</strong>`;
+                resultHtml += `<p>${analysis.message || result.message || 'Sensitive data detected but no matching policies'}</p>`;
                 resultHtml += `</div>`;
             }
             
-            if (result.detected_entities && result.detected_entities.length > 0) {
-            resultHtml += `<h5>Detected Entities (${result.detected_entities.length}):</h5>`;
-            resultHtml += '<div class="entities-list">';
-            result.detected_entities.forEach(entity => {
-                resultHtml += `
-                    <div class="entity-item">
-                        <span class="entity-type">${entity.entity_type}</span>
-                        <span class="entity-value">${entity.value}</span>
-                        <span class="entity-score">${(entity.score * 100).toFixed(1)}% confidence</span>
+            // Show applied policies
+            if (appliedPolicies.length > 0) {
+                resultHtml += `<h5 style="margin-top: 20px;">Applied Policies (${appliedPolicies.length}):</h5>`;
+                resultHtml += '<div style="margin-bottom: 20px;">';
+                appliedPolicies.forEach(policy => {
+                    const actionBadge = policy.action === 'block' ? 'badge-danger' : policy.action === 'encrypt' ? 'badge-success' : policy.action === 'alert' ? 'badge-warning' : 'badge-info';
+                    const severityBadge = policy.severity === 'critical' || policy.severity === 'high' ? 'badge-danger' : policy.severity === 'medium' ? 'badge-warning' : 'badge-info';
+                    resultHtml += `
+                        <div style="padding: 12px; margin-bottom: 8px; background: var(--light); border-radius: 8px; border-left: 4px solid var(--primary);">
+                            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px;">
+                                <strong>${policy.name}</strong>
+                                <div>
+                                    <span class="badge ${actionBadge}" style="margin-right: 8px;">${policy.action}</span>
+                                    <span class="badge ${severityBadge}">${policy.severity}</span>
+                                </div>
+                            </div>
+                            <div style="font-size: 0.9rem; color: var(--text-muted); margin-top: 4px;">
+                                Matched: ${policy.matched_entities.join(', ')} (${policy.matched_count} found)
+                            </div>
+                        </div>
+                    `;
+                });
+                resultHtml += '</div>';
+            }
+            
+            // Show action status
+            if (analysis.blocked || result.blocked) {
+                resultHtml += `<div class="alert-banner alert-warning" style="margin-bottom: 16px;">`;
+                resultHtml += `<strong>🚫 Email Blocked by Policy</strong>`;
+                resultHtml += `</div>`;
+            } else if (analysis.encrypted_text) {
+                resultHtml += `<div class="alert-banner alert-success" style="margin-bottom: 16px;">`;
+                resultHtml += `<strong>🔒 Email Content Encrypted</strong>`;
+                resultHtml += `</div>`;
+            }
+            
+            if (actionsTaken.length > 0) {
+                resultHtml += `<div style="margin-bottom: 16px;"><strong>Actions Taken:</strong> `;
+                actionsTaken.forEach(action => {
+                    resultHtml += `<span class="badge badge-info" style="margin-right: 4px;">${action}</span>`;
+                });
+                resultHtml += `</div>`;
+            }
+            
+            if (analysis.detected_entities && analysis.detected_entities.length > 0) {
+                resultHtml += `<h5>Detected Entities (${analysis.detected_entities.length}):</h5>`;
+                resultHtml += '<div class="entities-list">';
+                analysis.detected_entities.forEach(entity => {
+                    resultHtml += `
+                        <div class="entity-item">
+                            <span class="entity-type">${entity.entity_type}</span>
+                            <span class="entity-value">${entity.value}</span>
+                            <span class="entity-score">${(entity.score * 100).toFixed(1)}% confidence</span>
+                        </div>
+                    `;
+                });
+                resultHtml += '</div>';
+            }
+            
+            // Show encrypted text if available
+            if (analysis.encrypted_text) {
+                const escapedText = analysis.encrypted_text
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+                
+                const textForCopy = analysis.encrypted_text
+                    .replace(/\\/g, '\\\\')
+                    .replace(/'/g, "\\'")
+                    .replace(/"/g, '\\"')
+                    .replace(/\n/g, '\\n')
+                    .replace(/\r/g, '\\r');
+                
+                resultHtml += `<div style="margin-top: 24px; padding: 16px; background: var(--light); border-radius: 8px; border-left: 4px solid var(--success);">
+                    <h5 style="margin-top: 0; margin-bottom: 12px;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                        </svg>
+                        Encrypted Email Content
+                    </h5>
+                    <div style="background: white; padding: 12px; border-radius: 4px; border: 1px solid var(--border); font-family: monospace; word-break: break-all; white-space: pre-wrap; max-height: 300px; overflow-y: auto;">
+                        ${escapedText}
                     </div>
-                `;
-            });
-            resultHtml += '</div>';
+                    <button onclick="copyEncryptedText('${textForCopy}')" 
+                            style="margin-top: 8px; padding: 6px 12px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem;">
+                        Copy Encrypted Text
+                    </button>
+                </div>`;
             }
         } else {
             resultHtml += `<div class="alert-banner alert-success">`;
@@ -2449,8 +2680,8 @@ let authToken = null;
 // Load user from localStorage on page load
 function loadStoredAuth() {
     console.log('Loading stored auth from localStorage...');
-    const storedToken = localStorage.getItem('authToken');
-    const storedUser = localStorage.getItem('currentUser');
+    const storedToken = safeStorage.getItem('authToken');
+    const storedUser = safeStorage.getItem('currentUser');
 
     if (storedToken && storedUser) {
         try {
@@ -2465,8 +2696,8 @@ function loadStoredAuth() {
         } catch (e) {
             console.error('Error loading stored auth:', e);
             // Clear invalid stored data
-            localStorage.removeItem('authToken');
-            localStorage.removeItem('currentUser');
+            safeStorage.removeItem('authToken');
+            safeStorage.removeItem('currentUser');
             authToken = null;
             currentUser = null;
             updateAuthUI();
@@ -2707,7 +2938,7 @@ function getAuthHeaders() {
     } else {
         console.warn('No auth token available! User may need to login again.');
         // Try to reload from localStorage
-        const storedToken = localStorage.getItem('authToken');
+        const storedToken = safeStorage.getItem('authToken');
         if (storedToken) {
             authToken = storedToken;
             headers['Authorization'] = `Bearer ${authToken}`;
@@ -2761,8 +2992,8 @@ async function handleLogin(event) {
             };
 
             // Store in localStorage
-            localStorage.setItem('authToken', authToken);
-            localStorage.setItem('currentUser', JSON.stringify(currentUser));
+            safeStorage.setItem('authToken', authToken);
+            safeStorage.setItem('currentUser', JSON.stringify(currentUser));
 
             updateAuthUI();
             closeLoginModal();
@@ -2892,8 +3123,8 @@ async function handleRegister(event) {
 async function logout() {
     authToken = null;
     currentUser = null;
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('currentUser');
+    safeStorage.removeItem('authToken');
+    safeStorage.removeItem('currentUser');
 
     updateAuthUI();
     showNotification('Logged out successfully', 'success');
@@ -3689,7 +3920,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // Clear any old/invalid tokens first (for testing)
     // Uncomment the next line to force login screen on every page load
-    // localStorage.clear();
+    // safeStorage.clear();
 
     // Add event listeners to overlay buttons using IDs
     // Use event delegation for better reliability

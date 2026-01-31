@@ -49,6 +49,7 @@ class AnalysisResponse(BaseModel):
     alert_created: bool = False
     policies_matched: bool = False
     applied_policies: List[AppliedPolicySchema] = []
+    encrypted_text: Optional[str] = Field(None, description="Encrypted version of the text if encryption policies were applied")
     timestamp: datetime = Field(default_factory=get_current_time)
     
     class Config:

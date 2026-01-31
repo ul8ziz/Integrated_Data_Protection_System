@@ -86,6 +86,7 @@ class PolicyService:
         # If no active policies exist, return early - no actions should be taken
         if not policies:
             logger.debug("No active policies found - no actions will be taken")
+            logger.info(f"Detected {len(detected_entities)} entities but no active policies available")
             return {
                 "sensitive_data_detected": len(detected_entities) > 0,
                 "detected_entities": detected_entities,
@@ -93,7 +94,8 @@ class PolicyService:
                 "blocked": False,
                 "alert_created": False,
                 "policies_matched": False,
-                "applied_policies": []
+                "applied_policies": [],
+                "encrypted_text": None
             }
         
         # Check which policies apply
@@ -111,12 +113,12 @@ class PolicyService:
             ]
             
             if not relevant_entities:
-                logger.debug(f"Policy {policy.id} ({policy.name}) does not apply - no matching entities")
+                logger.debug(f"Policy {policy.id} ({policy.name}, action={policy.action}) does not apply - no matching entities. Policy entities: {policy_entities}, Detected entities: {[e['entity_type'] for e in detected_entities]}")
                 continue
             
             # Policy matches - add to matching policies
             matching_policies.append(policy)
-            logger.info(f"Policy {policy.id} ({policy.name}) applies - {len(relevant_entities)} relevant entities")
+            logger.info(f"Policy {policy.id} ({policy.name}, action={policy.action}) applies - {len(relevant_entities)} relevant entities of types: {[e['entity_type'] for e in relevant_entities]}")
             
             # Apply policy action
             if policy.action == "block":
@@ -149,10 +151,15 @@ class PolicyService:
                     logger.warning(f"block_data_transfer returned False for policy {policy.id}")
             
             elif policy.action == "encrypt":
-                # Encrypt detected entities
+                # Encrypt detected entities in the text
+                logger.info(f"Applying encrypt action for policy {policy.id} ({policy.name})")
                 for entity in relevant_entities:
                     encrypted_value = self.encryption.encrypt(entity["value"])
+                    # Store encrypted value for later text replacement
+                    entity["encrypted_value"] = encrypted_value
+                    entity["original_value"] = entity["value"]  # Keep original for reference
                     actions_taken.append(f"encrypted_{entity['entity_type']}")
+                logger.info(f"Encrypted {len(relevant_entities)} entities for policy {policy.id}")
             
             elif policy.action == "alert":
                 # Create alert
@@ -208,6 +215,40 @@ class PolicyService:
                     }
                 )
         
+        # Apply encryption to text if encrypt policies were applied
+        encrypted_text = None
+        if text and any(p.action == "encrypt" for p in matching_policies):
+            encrypted_text = text
+            # Sort entities by start position (descending) to replace from end to start
+            # This prevents position shifts when replacing
+            entities_to_encrypt = []
+            for policy in matching_policies:
+                if policy.action == "encrypt":
+                    policy_entities = policy.entity_types or []
+                    for entity in detected_entities:
+                        if (entity["entity_type"] in policy_entities and 
+                            "encrypted_value" in entity):
+                            entities_to_encrypt.append(entity)
+            
+            # Sort by start position descending
+            entities_to_encrypt.sort(key=lambda x: x["start"], reverse=True)
+            
+            # Replace original values with encrypted values in text
+            for entity in entities_to_encrypt:
+                start = entity["start"]
+                end = entity["end"]
+                original = entity.get("original_value", entity["value"])
+                encrypted = entity["encrypted_value"]
+                
+                # Replace in text
+                if encrypted_text[start:end] == original:
+                    encrypted_text = encrypted_text[:start] + encrypted + encrypted_text[end:]
+                    logger.debug(f"Replaced {original} with encrypted value at position {start}-{end}")
+                else:
+                    logger.warning(f"Text mismatch at position {start}-{end}: expected '{original}', found '{encrypted_text[start:end]}'")
+            
+            logger.info(f"Text encrypted: {len(entities_to_encrypt)} entities replaced")
+        
         # Prepare applied policies information
         applied_policies = []
         for policy in matching_policies:
@@ -233,7 +274,8 @@ class PolicyService:
             "blocked": blocked,
             "alert_created": alert_created,
             "policies_matched": len(matching_policies) > 0,
-            "applied_policies": applied_policies
+            "applied_policies": applied_policies,
+            "encrypted_text": encrypted_text
         }
     
     async def _create_alert(self, policy: Policy, detected_entities: List[Dict],

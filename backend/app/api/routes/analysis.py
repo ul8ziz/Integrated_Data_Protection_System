@@ -72,7 +72,8 @@ async def analyze_text(
                 blocked=result["blocked"],
                 alert_created=result.get("alert_created", False),
                 policies_matched=result.get("policies_matched", False),
-                applied_policies=applied_policies
+                applied_policies=applied_policies,
+                encrypted_text=result.get("encrypted_text")
             )
         else:
             # Only analyze without applying policies
@@ -208,7 +209,8 @@ async def analyze_file(
                 blocked=result["blocked"],
                 alert_created=result.get("alert_created", False),
                 policies_matched=result.get("policies_matched", False),
-                applied_policies=applied_policies
+                applied_policies=applied_policies,
+                encrypted_text=result.get("encrypted_text")
             )
         else:
             # Only analyze without applying policies

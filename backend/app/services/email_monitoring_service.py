@@ -94,16 +94,22 @@ class EmailMonitoringService:
             if not policy_result.get("policies_matched", False):
                 # No policies matched - allow email and don't create alerts
                 logger.info(f"Email from {from_email} allowed - no matching policies for detected entities")
+                logger.info(f"Detected entity types: {[e['entity_type'] for e in detected_entities]}")
+                logger.info(f"Available policies: {[p.name for p in await self.policy_service.get_active_policies()]}")
                 return {
                     "sensitive_data_detected": True,
                     "detected_entities": detected_entities,
                     "action": "allow",
                     "blocked": False,
                     "alert_created": False,
+                    "policies_matched": False,
+                    "applied_policies": [],
+                    "actions_taken": [],
+                    "encrypted_text": None,
                     "message": f"Email allowed - {len(detected_entities)} entities detected but no matching policies"
                 }
             
-            action = "block" if policy_result.get("blocked", False) else "alert" if policy_result.get("alert_created", False) else "allow"
+            action = "block" if policy_result.get("blocked", False) else "encrypt" if any("encrypted" in a for a in policy_result.get("actions_taken", [])) else "alert" if policy_result.get("alert_created", False) else "allow"
             
             # If blocked, notify MyDLP
             if action == "block":
@@ -130,7 +136,11 @@ class EmailMonitoringService:
                 "action": action,
                 "blocked": action == "block",
                 "alert_created": policy_result.get("alert_created", False),
-                "message": f"Email {'blocked' if action == 'block' else 'allowed'} - {len(detected_entities)} entities detected"
+                "policies_matched": policy_result.get("policies_matched", False),
+                "applied_policies": policy_result.get("applied_policies", []),
+                "actions_taken": policy_result.get("actions_taken", []),
+                "encrypted_text": policy_result.get("encrypted_text"),
+                "message": f"Email {'blocked' if action == 'block' else 'encrypted' if action == 'encrypt' else 'allowed'} - {len(detected_entities)} entities detected"
             }
             
         except Exception as e:
