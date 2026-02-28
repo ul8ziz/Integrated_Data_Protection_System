@@ -219,69 +219,53 @@ if (-not $mongoRunning) {
 # Change to backend directory
 Set-Location $backendPath
 
-# Get local IP address (skip loopback and APIPA addresses)
+# Get local IP address: prefer the adapter used for default route (Wi-Fi/Ethernet), exclude virtual adapters
 $localIP = $null
 try {
-    # Get all IPv4 addresses, exclude loopback (127.x.x.x) and APIPA (169.254.x.x)
-    $networkAdapters = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | 
-        Where-Object { 
-            $_.IPAddress -notlike "127.*" -and 
-            $_.IPAddress -notlike "169.254.*" -and
-            $_.IPAddress -notlike "0.0.0.0"
-        } |
-        Sort-Object -Property InterfaceIndex
-    
-    if ($networkAdapters) {
-        # Prefer IPs starting with 172, 192, or 10 (common private ranges)
-        $preferredIP = $networkAdapters | Where-Object { 
-            $_.IPAddress -like "172.*" -or 
-            $_.IPAddress -like "192.*" -or 
-            $_.IPAddress -like "10.*"
-        } | Select-Object -First 1
-        
-        if ($preferredIP) {
-            $localIP = $preferredIP.IPAddress
-        } else {
-            # Fallback to addresses that are not link-local and have valid prefix length
-            $preferredIP = $networkAdapters | Where-Object { $_.PrefixOrigin -eq "Dhcp" -or $_.PrefixOrigin -eq "Manual" } | Select-Object -First 1
-            if ($preferredIP) {
-                $localIP = $preferredIP.IPAddress
-            } else {
-                # Fallback to first non-loopback, non-APIPA address
-                $localIP = ($networkAdapters | Select-Object -First 1).IPAddress
+    # Method 1: IP from the adapter that has the default gateway (main network - usually Wi-Fi or Ethernet)
+    $defaultRoute = Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($defaultRoute) {
+        $idx = $defaultRoute.InterfaceIndex
+        $addr = Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |
+            Select-Object -First 1 -ExpandProperty IPAddress
+        if ($addr) { $localIP = $addr }
+    }
+    # Method 2: If no default route, use first physical adapter (exclude vEthernet, Docker, WSL, Default Switch, Teredo)
+    if (-not $localIP) {
+        $networkAdapters = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.IPAddress -notlike "127.*" -and
+                $_.IPAddress -notlike "169.254.*" -and
+                $_.IPAddress -notlike "0.0.0.0" -and
+                $_.InterfaceAlias -notmatch "vEthernet|Docker|WSL|Default Switch|Teredo|Loopback|Bluetooth"
             }
-        }
+        $preferred = $networkAdapters | Where-Object { $_.InterfaceAlias -match "Wi-Fi|Wireless|Ethernet" -and $_.InterfaceAlias -notmatch "vEthernet" } | Select-Object -First 1
+        if (-not $preferred) { $preferred = $networkAdapters | Select-Object -First 1 }
+        if ($preferred) { $localIP = $preferred.IPAddress }
     }
 } catch {
-    # Fallback method using ipconfig
+    $localIP = $null
+}
+if (-not $localIP) {
     try {
-        $ipconfigOutput = ipconfig | Select-String -Pattern "IPv4.*:\s*(\d+\.\d+\.\d+\.\d+)" -AllMatches
-        if ($ipconfigOutput) {
-            $matches = $ipconfigOutput.Matches
-            # First try to find IPs starting with 172, 192, or 10
-            foreach ($match in $matches) {
-                $ip = $match.Groups[1].Value
-                if ($ip -notlike "127.*" -and $ip -notlike "169.254.*") {
-                    if ($ip -like "172.*" -or $ip -like "192.*" -or $ip -like "10.*") {
-                        $localIP = $ip
-                        break
-                    }
-                }
-            }
-            # If no preferred IP found, use first valid IP
-            if (-not $localIP) {
-                foreach ($match in $matches) {
-                    $ip = $match.Groups[1].Value
-                    if ($ip -notlike "127.*" -and $ip -notlike "169.254.*") {
-                        $localIP = $ip
-                        break
-                    }
+        $ipconfigOutput = ipconfig | Out-String
+        $sections = $ipconfigOutput -split "adapter "
+        foreach ($section in $sections) {
+            if ($section -match "^(Wi-Fi|Wireless|Ethernet)[^\r\n]*" -and $section -notmatch "vEthernet|Default Switch") {
+                if ($section -match "IPv4[^\d]*(\d+\.\d+\.\d+\.\d+)") {
+                    $ip = $Matches[1]
+                    if ($ip -notlike "127.*" -and $ip -notlike "169.254.*") { $localIP = $ip; break }
                 }
             }
         }
-    } catch {
-        $localIP = "127.0.0.1"
-    }
+        if (-not $localIP) {
+            if ($ipconfigOutput -match "IPv4[^\d]*(\d+\.\d+\.\d+\.\d+)") {
+                $ip = $Matches[1]
+                if ($ip -notlike "127.*" -and $ip -notlike "169.254.*" -and $ip -notlike "172\.31\.*" -and $ip -notlike "172\.18\.*") { $localIP = $ip }
+            }
+        }
+    } catch { }
 }
 if (-not $localIP) {
     $localIP = "127.0.0.1"

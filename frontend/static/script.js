@@ -8,74 +8,84 @@ const ALERT_SOUND = new Audio("data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAA
 const BEEP_SOUND = "data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU";
 
 // ============================================================================
-// Safe localStorage wrapper - handles access denied errors gracefully
+// Safe localStorage wrapper - with sessionStorage fallback to preserve session on refresh
+// When localStorage is blocked (e.g. "Access is denied"), use sessionStorage so refresh keeps the user logged in.
 // ============================================================================
+let _authStorage = null; // Will be localStorage or sessionStorage
+
+function getAuthStorage() {
+    if (_authStorage !== null) return _authStorage;
+    try {
+        localStorage.setItem('__auth_test__', '1');
+        localStorage.removeItem('__auth_test__');
+        _authStorage = localStorage;
+        return _authStorage;
+    } catch (e) {
+        console.warn('localStorage not available, using sessionStorage for auth (session will persist on refresh in this tab):', e.message);
+    }
+    try {
+        sessionStorage.setItem('__auth_test__', '1');
+        sessionStorage.removeItem('__auth_test__');
+        _authStorage = sessionStorage;
+        return _authStorage;
+    } catch (e2) {
+        console.warn('sessionStorage also not available:', e2.message);
+        return null;
+    }
+}
+
 const safeStorage = {
-    // Check if localStorage is available
     isAvailable: function() {
-        try {
-            const test = '__localStorage_test__';
-            localStorage.setItem(test, test);
-            localStorage.removeItem(test);
-            return true;
-        } catch (e) {
-            console.warn('localStorage is not available:', e.message);
-            return false;
-        }
+        return getAuthStorage() !== null;
     },
-    
-    // Safe getItem
+
     getItem: function(key) {
         try {
-            if (!this.isAvailable()) {
-                return null;
-            }
-            return localStorage.getItem(key);
+            const storage = getAuthStorage();
+            return storage ? storage.getItem(key) : null;
         } catch (e) {
-            console.warn(`Failed to get localStorage item "${key}":`, e.message);
+            console.warn(`Failed to get "${key}":`, e.message);
             return null;
         }
     },
-    
-    // Safe setItem
+
     setItem: function(key, value) {
         try {
-            if (!this.isAvailable()) {
-                console.warn('localStorage is not available, cannot save:', key);
-                return false;
+            const storage = getAuthStorage();
+            if (storage) {
+                storage.setItem(key, value);
+                return true;
             }
-            localStorage.setItem(key, value);
-            return true;
+            return false;
         } catch (e) {
-            console.warn(`Failed to set localStorage item "${key}":`, e.message);
+            console.warn(`Failed to set "${key}":`, e.message);
             return false;
         }
     },
-    
-    // Safe removeItem
+
     removeItem: function(key) {
         try {
-            if (!this.isAvailable()) {
-                return false;
+            const storage = getAuthStorage();
+            if (storage) storage.removeItem(key);
+            if (_authStorage === localStorage && sessionStorage) {
+                try { sessionStorage.removeItem(key); } catch (_) {}
+            } else if (_authStorage === sessionStorage && localStorage) {
+                try { localStorage.removeItem(key); } catch (_) {}
             }
-            localStorage.removeItem(key);
             return true;
         } catch (e) {
-            console.warn(`Failed to remove localStorage item "${key}":`, e.message);
+            console.warn(`Failed to remove "${key}":`, e.message);
             return false;
         }
     },
-    
-    // Safe clear
+
     clear: function() {
         try {
-            if (!this.isAvailable()) {
-                return false;
-            }
-            localStorage.clear();
+            const storage = getAuthStorage();
+            if (storage) storage.clear();
             return true;
         } catch (e) {
-            console.warn('Failed to clear localStorage:', e.message);
+            console.warn('Failed to clear storage:', e.message);
             return false;
         }
     }
@@ -2829,8 +2839,11 @@ function updateAuthUI() {
                 if (typeof loadAlerts === 'function') loadAlerts();
                 if (typeof loadMonitoringData === 'function') loadMonitoringData();
             }, 300);
+            // Start real-time notification polling for admin
+            if (typeof startAdminNotificationPolling === 'function') startAdminNotificationPolling();
         } else {
             // Regular user: Hide admin-only tabs (Policies, Alerts, Monitoring, Users)
+            if (typeof stopAdminNotificationPolling === 'function') stopAdminNotificationPolling();
             // Regular users can only access: Analysis (File + Text) and Test Email
             hideTabButton(policiesTabBtn);
             hideTabButton(alertsTabBtn);
@@ -3121,6 +3134,7 @@ async function handleRegister(event) {
 
 // Logout
 async function logout() {
+    if (typeof stopAdminNotificationPolling === 'function') stopAdminNotificationPolling();
     authToken = null;
     currentUser = null;
     safeStorage.removeItem('authToken');
@@ -3278,6 +3292,178 @@ let policiesPagination = { total: 0, total_pages: 0, limit: 50 };
 
 let currentAlertsPage = 1;
 let alertsPagination = { total: 0, total_pages: 0, limit: 10, has_next: false, has_prev: false };
+
+// Admin real-time notification polling
+let lastNotificationCheck = null;
+let notificationPollingIntervalId = null;
+const NOTIFICATION_POLL_INTERVAL_MS = 5000;
+/** Set of alert IDs we've already shown in this session to avoid duplicate dialogs */
+let shownAlertIds = new Set();
+/** Prevent overlapping fetch calls */
+let recentAlertsFetchInFlight = false;
+
+function startAdminNotificationPolling() {
+    if (!currentUser || String(currentUser.role).toLowerCase() !== 'admin' || !authToken) return;
+    stopAdminNotificationPolling();
+    lastNotificationCheck = new Date().toISOString();
+    shownAlertIds.clear();
+    notificationPollingIntervalId = setInterval(fetchRecentAlertsAndShowDialogs, NOTIFICATION_POLL_INTERVAL_MS);
+    // Run first poll immediately so we don't wait for the interval
+    fetchRecentAlertsAndShowDialogs();
+}
+
+function stopAdminNotificationPolling() {
+    if (notificationPollingIntervalId) {
+        clearInterval(notificationPollingIntervalId);
+        notificationPollingIntervalId = null;
+    }
+}
+
+async function fetchRecentAlertsAndShowDialogs() {
+    const isAdmin = currentUser && String(currentUser.role).toLowerCase() === 'admin';
+    if (!currentUser || !isAdmin || !authToken || !lastNotificationCheck || recentAlertsFetchInFlight) return;
+    recentAlertsFetchInFlight = true;
+    const sinceAtStart = lastNotificationCheck;
+    try {
+        const since = encodeURIComponent(sinceAtStart);
+        const response = await fetch(`/api/alerts/recent?since=${since}&limit=50`, {
+            headers: getAuthHeaders()
+        });
+        if (!response.ok) {
+            if (response.status === 401) {
+                stopAdminNotificationPolling();
+            }
+            return;
+        }
+        const data = await response.json();
+        const items = data.items || (Array.isArray(data) ? data : []);
+        if (!Array.isArray(items) || items.length === 0) {
+            lastNotificationCheck = new Date().toISOString();
+            return;
+        }
+        const newAlerts = items.filter(a => a && a.id && !shownAlertIds.has(String(a.id)));
+        newAlerts.forEach(alert => {
+            shownAlertIds.add(String(alert.id));
+            showAlertDialog(alert);
+        });
+        lastNotificationCheck = new Date().toISOString();
+        if (newAlerts.length > 0 && typeof loadAlerts === 'function') loadAlerts(1);
+    } catch (e) {
+        console.warn('Failed to fetch recent alerts:', e);
+    } finally {
+        recentAlertsFetchInFlight = false;
+    }
+}
+
+function showAlertDialog(alert) {
+    function escapeHtml(str) {
+        if (str == null) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'alert-notification-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-label', 'Policy violation alert');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:999999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);padding:24px;backdrop-filter:blur(8px);';
+
+    const policyName = (alert && (alert.policy_name || alert.title)) || '—';
+    const clientName = (alert && alert.source_user) || 'Unknown';
+    const desc = (alert && alert.description) || '';
+    const timeStr = (alert && alert.created_at)
+        ? new Date(alert.created_at).toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : '';
+    const severity = (alert && alert.severity) ? String(alert.severity) : 'medium';
+    const status = (alert && alert.status) ? String(alert.status) : 'pending';
+    const actionTaken = (alert && alert.blocked) ? 'Blocked' : (alert && alert.action_taken) || 'Alert';
+    const severityClass = severity === 'high' || severity === 'critical' ? 'danger' : severity === 'medium' ? 'warning' : 'info';
+    const statusClass = status === 'resolved' ? 'success' : status === 'pending' ? 'warning' : status === 'acknowledged' ? 'info' : 'secondary';
+    const actionClass = (alert && alert.blocked) ? 'danger' : 'info';
+
+    const hasEntities = alert && alert.detected_entities && alert.detected_entities.length > 0;
+    const entitiesHtml = hasEntities
+        ? alert.detected_entities.map(e => {
+            const t = e.entity_type || e.type || 'Unknown';
+            const v = e.value || 'N/A';
+            return `<div class="entity-item"><span class="entity-type-badge">${escapeHtml(t)}</span><span class="entity-value">${escapeHtml(v)}</span></div>`;
+        }).join('')
+        : '<span class="text-muted">No entities detected</span>';
+
+    overlay.innerHTML = `
+        <div class="modal-content alert-details-modal alert-notification-dialog-content" style="max-width:520px;" onclick="event.stopPropagation()">
+            <div class="alert-modal-header">
+                <div class="alert-header-content">
+                    <h2 class="alert-incident-title">Policy Violation</h2>
+                    <p class="alert-policy-name">${escapeHtml(policyName)}</p>
+                </div>
+                <button type="button" class="close-btn alert-close-btn alert-notification-close" aria-label="Close">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="alert-summary-section">
+                <div class="summary-row">
+                    <div class="summary-item">
+                        <span class="summary-label">Severity</span>
+                        <span class="badge badge-${severityClass}">${escapeHtml(severity)}</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">Status</span>
+                        <span class="badge badge-${statusClass}">${escapeHtml(status)}</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">Action</span>
+                        <span class="badge badge-${actionClass}">${escapeHtml(actionTaken)}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="alert-details-section">
+                <div class="detail-section">
+                    <h4>Source</h4>
+                    <p class="detail-value">${escapeHtml(clientName)}</p>
+                </div>
+                ${desc ? `<div class="detail-section"><h4>Description</h4><p class="detail-value">${escapeHtml(desc)}</p></div>` : ''}
+                <div class="detail-section">
+                    <h4>Detected Entities</h4>
+                    <div class="entities-container ${!hasEntities ? 'entities-empty' : ''}">${entitiesHtml}</div>
+                </div>
+                ${timeStr ? `<div class="detail-section"><h4>Created At</h4><p class="detail-value">${escapeHtml(timeStr)}</p></div>` : ''}
+            </div>
+            <div class="alert-modal-actions">
+                <button type="button" class="btn btn-primary alert-notification-btn-view">View Alerts</button>
+                <button type="button" class="btn btn-secondary alert-notification-btn-ok">OK</button>
+            </div>
+        </div>
+    `;
+    function close() {
+        overlay.remove();
+    }
+    const closeBtn = overlay.querySelector('.alert-notification-close');
+    const okBtn = overlay.querySelector('.alert-notification-btn-ok');
+    const viewBtn = overlay.querySelector('.alert-notification-btn-view');
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    if (okBtn) okBtn.addEventListener('click', close);
+    if (viewBtn) {
+        viewBtn.addEventListener('click', () => {
+            close();
+            const alertsTabBtn = document.getElementById('alertsTabBtn');
+            if (alertsTabBtn) {
+                showTab('alerts', alertsTabBtn);
+                if (typeof loadAlerts === 'function') loadAlerts(1);
+            }
+        });
+    }
+    const shownAt = Date.now();
+    overlay.addEventListener('click', function(e) {
+        if (e.target !== overlay) return;
+        if (Date.now() - shownAt < 400) return;
+        close();
+    });
+    document.body.appendChild(overlay);
+}
 
 let currentMonitoringPage = 1;
 let monitoringPagination = { total: 0, total_pages: 0, limit: 10 };

@@ -54,38 +54,60 @@ cd /d "%BACKEND_PATH%"
 REM Create logs directory
 if not exist "logs" mkdir logs
 
-REM Get local IP address (skip loopback and APIPA addresses)
+REM Get local IP: prefer Wi-Fi or Ethernet adapter, skip virtual (vEthernet, Default Switch)
 set LOCAL_IP=
-REM Get all IPv4 addresses and filter out loopback and APIPA
+set PREFERRED=0
+for /f "delims=" %%L in ('ipconfig ^| findstr /n "."') do (
+    set "LINE=%%L"
+    set "LINE=!LINE:*:=!"
+    echo !LINE! | findstr /i /c:"adapter" >nul
+    if not errorlevel 1 (
+        set PREFERRED=0
+        echo !LINE! | findstr /i /c:"vEthernet" >nul
+        if errorlevel 1 (
+            echo !LINE! | findstr /i /c:"Default Switch" >nul
+            if errorlevel 1 (
+                echo !LINE! | findstr /i /c:"Wi-Fi" >nul
+                if not errorlevel 1 set PREFERRED=1
+                if "!PREFERRED!"=="0" echo !LINE! | findstr /i /c:"Wireless" >nul
+                if not errorlevel 1 set PREFERRED=1
+                if "!PREFERRED!"=="0" echo !LINE! | findstr /i /c:"Ethernet" >nul
+                if not errorlevel 1 set PREFERRED=1
+            )
+        )
+    )
+    echo !LINE! | findstr /c:"IPv4" >nul
+    if not errorlevel 1 if "!PREFERRED!"=="1" (
+        for /f "tokens=2 delims=:" %%a in ("!LINE!") do (
+            set IP_ADDR=%%a
+            set IP_ADDR=!IP_ADDR: =!
+            echo !IP_ADDR! | findstr /R "^127\." >nul
+            if errorlevel 1 (
+                echo !IP_ADDR! | findstr /R "^169\.254\." >nul
+                if errorlevel 1 (
+                    set LOCAL_IP=!IP_ADDR!
+                    goto :found_ip
+                )
+            )
+        )
+    )
+)
+REM Fallback: any valid private IP except common virtual ranges (172.31, 172.18)
 for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /c:"IPv4"') do (
     set IP_ADDR=%%a
     set IP_ADDR=!IP_ADDR: =!
-    REM Skip empty, 127.x.x.x (loopback), and 169.254.x.x (APIPA)
     if not "!IP_ADDR!"=="" (
         echo !IP_ADDR! | findstr /R "^127\." >nul
         if errorlevel 1 (
             echo !IP_ADDR! | findstr /R "^169\.254\." >nul
             if errorlevel 1 (
-                REM Found valid IP (not loopback, not APIPA)
-                REM Prefer IPs starting with 172, 192, or 10 (common private ranges)
-                echo !IP_ADDR! | findstr /R "^172\." >nul
-                if not errorlevel 1 (
-                    set LOCAL_IP=!IP_ADDR!
-                    goto :found_ip
-                )
-                echo !IP_ADDR! | findstr /R "^192\." >nul
-                if not errorlevel 1 (
-                    set LOCAL_IP=!IP_ADDR!
-                    goto :found_ip
-                )
-                echo !IP_ADDR! | findstr /R "^10\." >nul
-                if not errorlevel 1 (
-                    set LOCAL_IP=!IP_ADDR!
-                    goto :found_ip
-                )
-                REM If no preferred IP found yet, use this one
-                if "!LOCAL_IP!"=="" (
-                    set LOCAL_IP=!IP_ADDR!
+                echo !IP_ADDR! | findstr /R "^172\.31\." >nul
+                if errorlevel 1 (
+                    echo !IP_ADDR! | findstr /R "^172\.18\." >nul
+                    if errorlevel 1 (
+                        set LOCAL_IP=!IP_ADDR!
+                        goto :found_ip
+                    )
                 )
             )
         )

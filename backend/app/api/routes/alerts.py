@@ -125,6 +125,80 @@ async def get_alerts(
         raise HTTPException(status_code=500, detail=f"Error fetching alerts: {str(e)}")
 
 
+@router.get("/recent", response_model=Dict[str, Any])
+async def get_recent_alerts(
+    since: Optional[str] = Query(None, description="ISO 8601 datetime; alerts created after this time"),
+    limit: int = Query(50, ge=1, le=100),
+    current_user = Depends(get_current_admin)  # Admin only
+):
+    """
+    Get alerts created after a given time (for admin real-time notifications).
+    If 'since' is omitted, defaults to 24 hours ago.
+    """
+    try:
+        from datetime import timedelta
+        from dateutil import parser as date_parser
+        from app.utils.datetime_utils import get_current_time
+
+        if since:
+            try:
+                since_dt = date_parser.isoparse(since)
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid 'since' format; use ISO 8601")
+        else:
+            since_dt = get_current_time() - timedelta(hours=24)
+
+        query = {"created_at": {"$gt": since_dt}}
+        alerts = await Alert.find(query).sort("-created_at").limit(limit).to_list()
+
+        result = []
+        for alert in alerts:
+            try:
+                policy_name = None
+                if alert.policy_id:
+                    try:
+                        from beanie import PydanticObjectId
+                        policy = await Policy.get(PydanticObjectId(alert.policy_id))
+                        if policy and not getattr(policy, "is_deleted", False):
+                            policy_name = policy.name
+                    except Exception:
+                        pass
+
+                result.append(AlertResponse(
+                    id=str(alert.id),
+                    title=alert.title,
+                    description=alert.description,
+                    severity=alert.severity.value if alert.severity else "medium",
+                    status=alert.status.value if alert.status else "pending",
+                    source_ip=alert.source_ip,
+                    source_user=alert.source_user,
+                    source_device=alert.source_device,
+                    detected_entities=alert.detected_entities if alert.detected_entities else [],
+                    policy_id=str(alert.policy_id) if alert.policy_id else None,
+                    policy_name=policy_name,
+                    action_taken=alert.action_taken,
+                    blocked=alert.blocked if alert.blocked is not None else False,
+                    created_at=alert.created_at,
+                    resolved_at=alert.resolved_at,
+                    resolved_by=alert.resolved_by
+                ))
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Error processing alert {alert.id}: {e}")
+                continue
+
+        return {
+            "items": result,
+            "count": len(result)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error fetching recent alerts: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching recent alerts: {str(e)}")
+
+
 @router.get("/{alert_id}", response_model=AlertResponse)
 async def get_alert(
     alert_id: str,

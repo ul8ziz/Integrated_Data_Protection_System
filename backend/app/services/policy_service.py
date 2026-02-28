@@ -292,9 +292,16 @@ class PolicyService:
             }
             severity = severity_map.get(policy.severity, AlertSeverity.MEDIUM)
             
+            # Clear description for admin notification: policy name, client, entity count
+            client_label = source_user or "Unknown"
+            description = (
+                f"انتهاك سياسة: {policy.name} — المستخدم: {client_label} — "
+                f"تم اكتشاف {len(detected_entities)} كيانات حساسة"
+            )
+            
             alert = Alert(
                 title=policy.name,  # Use policy name as title
-                description=f"Detected {len(detected_entities)} sensitive entities",
+                description=description,
                 severity=severity,
                 status=AlertStatus.PENDING,
                 source_ip=source_ip,
