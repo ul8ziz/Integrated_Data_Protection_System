@@ -39,6 +39,9 @@ class Alert(Document):
     source_user: Optional[str] = Field(None, max_length=100)
     source_device: Optional[str] = Field(None, max_length=100)
     
+    # Email attachments (when alert is from email with files)
+    attachment_names: Optional[List[str]] = None
+    
     # Detected entities
     detected_entities: Optional[List[Dict[str, Any]]] = None  # List of detected sensitive data
     policy_id: Optional[str] = None  # Policy ID reference
@@ -46,6 +49,9 @@ class Alert(Document):
     # Action taken
     action_taken: Optional[str] = Field(None, max_length=100)  # blocked, encrypted, anonymized, etc.
     blocked: bool = Field(default=False)
+    
+    # Optional extra data (e.g. email recipients for email alerts)
+    extra_data: Optional[Dict[str, Any]] = None
     
     # Metadata
     created_at: datetime = Field(default_factory=get_current_time)

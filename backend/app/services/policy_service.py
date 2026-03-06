@@ -58,7 +58,8 @@ class PolicyService:
     
     async def apply_policy_with_entities(self, detected_entities: List[Dict], 
                                    text: str = None, source_ip: str = None, 
-                                   source_user: str = None, source_device: str = None) -> Dict[str, Any]:
+                                   source_user: str = None, source_device: str = None,
+                                   source_attachment_names: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Apply policies using pre-detected entities (avoids re-analysis)
         
@@ -68,6 +69,7 @@ class PolicyService:
             source_ip: Source IP address
             source_user: Source user
             source_device: Source device
+            source_attachment_names: Optional list of attachment/file names (e.g. from email)
             
         Returns:
             Result dictionary with actions taken
@@ -144,14 +146,15 @@ class PolicyService:
                         source_ip=source_ip,
                         source_user=source_user,
                         source_device=source_device,
-                        blocked=True
+                        blocked=True,
+                        attachment_names=source_attachment_names
                     )
                     alert_created = True
                 else:
                     logger.warning(f"block_data_transfer returned False for policy {policy.id}")
             
             elif policy.action == "encrypt":
-                # Encrypt detected entities in the text
+                # Encrypt detected entities in the text + notify manager (alert)
                 logger.info(f"Applying encrypt action for policy {policy.id} ({policy.name})")
                 for entity in relevant_entities:
                     encrypted_value = self.encryption.encrypt(entity["value"])
@@ -160,6 +163,19 @@ class PolicyService:
                     entity["original_value"] = entity["value"]  # Keep original for reference
                     actions_taken.append(f"encrypted_{entity['entity_type']}")
                 logger.info(f"Encrypted {len(relevant_entities)} entities for policy {policy.id}")
+                # Notify manager: create alert (email allowed but with encryption applied)
+                if not alert_created:
+                    await self._create_alert(
+                        policy=policy,
+                        detected_entities=relevant_entities,
+                        source_ip=source_ip,
+                        source_user=source_user,
+                        source_device=source_device,
+                        blocked=False,
+                        attachment_names=source_attachment_names
+                    )
+                    alert_created = True
+                    actions_taken.append("alert_created")
             
             elif policy.action == "alert":
                 # Create alert
@@ -170,7 +186,8 @@ class PolicyService:
                         source_ip=source_ip,
                         source_user=source_user,
                         source_device=source_device,
-                        blocked=blocked
+                        blocked=blocked,
+                        attachment_names=source_attachment_names
                     )
                     alert_created = True
                     actions_taken.append("alert_created")
@@ -188,7 +205,8 @@ class PolicyService:
                         "detected_entities_count": len(detected_entities),
                         "policies_applied": len(matching_policies),
                         "matching_policy_ids": [str(p.id) for p in matching_policies],
-                        "blocked": blocked
+                        "blocked": blocked,
+                        "attachment_names": source_attachment_names or []
                     }
                 )
                 
@@ -280,7 +298,8 @@ class PolicyService:
     
     async def _create_alert(self, policy: Policy, detected_entities: List[Dict],
                      source_ip: str = None, source_user: str = None, 
-                     source_device: str = None, blocked: bool = False):
+                     source_device: str = None, blocked: bool = False,
+                     attachment_names: Optional[List[str]] = None):
         """Create an alert for policy violation"""
         try:
             # Determine severity based on policy
@@ -310,7 +329,8 @@ class PolicyService:
                 detected_entities=detected_entities,
                 policy_id=str(policy.id),
                 action_taken=policy.action,
-                blocked=blocked
+                blocked=blocked,
+                attachment_names=attachment_names
             )
             
             await alert.insert()

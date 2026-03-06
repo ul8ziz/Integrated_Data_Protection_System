@@ -1,6 +1,14 @@
 // Use relative URL to avoid CORS issues
 const API_BASE = window.location.origin || 'http://localhost:8000';
 
+/** Format alert created_at in user's local timezone (browser). Returns 'N/A' if invalid. */
+function formatAlertTimeLocal(createdAt, fallback) {
+    if (createdAt == null || createdAt === '') return (fallback || 'N/A');
+    const d = new Date(createdAt);
+    if (isNaN(d.getTime())) return (fallback || 'N/A');
+    return d.toLocaleString(undefined, { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 // Sound effect for alerts (Simple beep/alert sound encoded in base64)
 const ALERT_SOUND = new Audio("data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU"); // Shortened placeholder, will use a real beep
 
@@ -321,6 +329,22 @@ window.showRegisterModal = function() {
         // Add show class
         modal.classList.add('show');
         
+        // Load departments for the dropdown (no auth required)
+        fetch('/api/departments/list')
+            .then(r => r.ok ? r.json() : [])
+            .then(list => {
+                const sel = document.getElementById('registerDepartment');
+                if (!sel) return;
+                sel.innerHTML = '<option value="">Select department...</option>';
+                (list || []).forEach(d => {
+                    const opt = document.createElement('option');
+                    opt.value = d.id;
+                    opt.textContent = d.name || d.id;
+                    sel.appendChild(opt);
+                });
+            })
+            .catch(() => {});
+        
         // Focus on username input
         setTimeout(() => {
             const usernameInput = document.getElementById('registerUsername');
@@ -367,6 +391,18 @@ function playAlertSound() {
 
 // Notification system (must be defined early)
 function showNotification(message, type = 'info') {
+    if (message != null && typeof message !== 'string') {
+        if (typeof message === 'object' && message.message) {
+            message = message.message;
+        } else if (Array.isArray(message)) {
+            message = message.map(function (m) {
+                return typeof m === 'string' ? m : (m && m.msg) || JSON.stringify(m);
+            }).join('. ');
+        } else {
+            message = JSON.stringify(message);
+        }
+    }
+    const text = String(message || '');
     // Play sound for warnings and errors
     if (type === 'error' || type === 'warning' || type === 'danger') {
         playAlertSound();
@@ -380,7 +416,7 @@ function showNotification(message, type = 'info') {
     
     const notification = document.createElement('div');
     notification.className = `notification notification-${type}`;
-    notification.textContent = message;
+    notification.textContent = text;
     document.body.appendChild(notification);
     
     // Show notification
@@ -401,11 +437,12 @@ function showTab(tabName, element) {
     
     // Check if user has permission to access this tab
     if (currentUser && currentUser.role !== 'admin') {
-        // Regular users can only access: analysis, testEmail
-        const allowedTabs = ['analysis', 'testEmail'];
+        const allowedTabs = currentUser.role === 'manager'
+            ? ['analysis', 'testEmail', 'users']
+            : ['analysis', 'testEmail'];
         if (!allowedTabs.includes(tabName)) {
-            console.warn('Access denied: Regular users can only access Analysis and Test Email tabs');
-            showNotification('Access denied. This feature is only available for administrators.', 'error');
+            console.warn('Access denied: This tab is not available for your role');
+            showNotification('Access denied. This feature is not available for your role.', 'error');
             return;
         }
     }
@@ -453,7 +490,7 @@ function showTab(tabName, element) {
     }
     
     // Load data when specific tabs are opened
-    if (tabName === 'users' && currentUser && currentUser.role === 'admin') {
+    if (tabName === 'users' && currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) {
         // Load all users by default when opening users tab
         setTimeout(() => {
             if (typeof loadUsers === 'function') {
@@ -481,6 +518,25 @@ function showTab(tabName, element) {
                 loadMonitoringData(1);
             }
         }, 100);
+    } else if (tabName === 'testEmail' && currentUser) {
+        // Test Email tab — inbox loads when user switches to "Emails sent to you" sub-tab
+    }
+}
+
+// Email tab sub-tab switching (Test Email | Emails sent to you)
+function switchEmailMode(mode, buttonElement) {
+    const emailTab = document.getElementById('testEmail');
+    if (!emailTab) return;
+    emailTab.querySelectorAll('.sub-tab-btn').forEach(btn => btn.classList.remove('active'));
+    if (buttonElement) buttonElement.classList.add('active');
+    emailTab.querySelectorAll('.email-mode-section').forEach(section => section.classList.remove('active'));
+    if (mode === 'test') {
+        const section = document.getElementById('testEmailSection');
+        if (section) section.classList.add('active');
+    } else if (mode === 'inbox') {
+        const section = document.getElementById('emailInboxSection');
+        if (section) section.classList.add('active');
+        if (currentUser && typeof loadEmailList === 'function') loadEmailList(1);
     }
 }
 
@@ -506,6 +562,43 @@ function switchAnalysisMode(mode, buttonElement) {
         document.getElementById('fileAnalysisSection').classList.add('active');
     } else if (mode === 'text') {
         document.getElementById('textAnalysisSection').classList.add('active');
+    } else if (mode === 'decrypt') {
+        const el = document.getElementById('decryptAnalysisSection');
+        if (el) el.classList.add('active');
+    }
+}
+
+async function decryptPastedContent() {
+    const input = document.getElementById('decryptTextInput');
+    const resultDiv = document.getElementById('decryptResult');
+    const resultContent = document.getElementById('decryptResultContent');
+    const btn = document.getElementById('decryptContentBtn');
+    if (!input || !resultDiv || !resultContent) return;
+    const content = (input.value || '').trim();
+    if (!content) {
+        showNotification('Paste encrypted text first', 'warning');
+        return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Decrypting...'; }
+    try {
+        const response = await fetch('/api/analyze/decrypt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({ content: content })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.detail || response.statusText || 'Decrypt failed');
+        }
+        if (data.decrypted != null) {
+            resultContent.textContent = data.decrypted;
+            resultDiv.style.display = 'block';
+            showNotification('Decrypted successfully.', 'success');
+        }
+    } catch (e) {
+        showNotification(e.message || 'Decryption failed.', 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Decrypt'; }
     }
 }
 
@@ -1583,6 +1676,133 @@ function resetPolicyForm() {
     }
 }
 
+// Department functions (Admin only)
+async function loadDepartments() {
+    try {
+        if (!authToken || !currentUser || currentUser.role !== 'admin') return;
+        const response = await fetch('/api/departments/', { headers: getAuthHeaders() });
+        if (!response.ok) {
+            if (response.status === 401 || response.status === 403) { logout(); return; }
+            throw new Error(await response.text().catch(() => 'Unknown error'));
+        }
+        const items = await response.json();
+        displayDepartments(Array.isArray(items) ? items : []);
+    } catch (e) {
+        console.error('Error loading departments:', e);
+        const el = document.getElementById('departmentsList');
+        if (el) el.innerHTML = '<p class="error">Failed to load departments</p>';
+        showNotification('Error loading departments', 'error');
+    }
+}
+
+function displayDepartments(items) {
+    const list = document.getElementById('departmentsList');
+    if (!list) return;
+    const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    if (!items || items.length === 0) {
+        list.innerHTML = '<div class="empty-state"><p>No departments. Click "Add Department" to create one.</p></div>';
+        return;
+    }
+    let html = '<div class="table-container"><table class="policies-table"><thead><tr><th>الاسم</th><th>الوصف</th><th>إجراءات</th></tr></thead><tbody>';
+    items.forEach(d => {
+        const desc = (d.description || '').replace(/</g, '&lt;').substring(0, 60);
+        const nameForJs = String(d.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        html += `<tr>
+            <td>${esc(d.name)}</td>
+            <td>${desc}${(d.description || '').length > 60 ? '...' : ''}</td>
+            <td>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="editDepartment('${d.id}')">Edit</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="deleteDepartment('${d.id}', '${nameForJs}')">Delete</button>
+            </td>
+        </tr>`;
+    });
+    html += '</tbody></table></div>';
+    list.innerHTML = html;
+}
+
+function showCreateDepartmentForm() {
+    document.getElementById('departmentFormTitle').textContent = 'Add Department';
+    document.getElementById('departmentId').value = '';
+    document.getElementById('departmentName').value = '';
+    document.getElementById('departmentDescription').value = '';
+    const modal = document.getElementById('departmentFormModal');
+    if (modal) {
+        modal.classList.add('show');
+        modal.style.setProperty('display', 'flex', 'important');
+        modal.setAttribute('aria-hidden', 'false');
+    }
+}
+
+function closeDepartmentModal() {
+    const modal = document.getElementById('departmentFormModal');
+    if (modal) {
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+        modal.setAttribute('aria-hidden', 'true');
+    }
+}
+
+function editDepartment(id) {
+    fetch(`/api/departments/${id}`, { headers: getAuthHeaders() })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('Failed to load')))
+        .then(d => {
+            document.getElementById('departmentFormTitle').textContent = 'Edit Department';
+            document.getElementById('departmentId').value = d.id;
+            document.getElementById('departmentName').value = d.name || '';
+            document.getElementById('departmentDescription').value = d.description || '';
+            const modal = document.getElementById('departmentFormModal');
+            if (modal) {
+                modal.classList.add('show');
+                modal.style.setProperty('display', 'flex', 'important');
+                modal.setAttribute('aria-hidden', 'false');
+            }
+        })
+        .catch(e => { showNotification('Error loading department', 'error'); });
+}
+
+async function saveDepartment(event) {
+    event.preventDefault();
+    const id = document.getElementById('departmentId').value;
+    const name = document.getElementById('departmentName').value.trim();
+    const description = document.getElementById('departmentDescription').value.trim() || null;
+    const url = id ? `/api/departments/${id}` : '/api/departments/';
+    const method = id ? 'PUT' : 'POST';
+    const body = id ? { name, description } : { name, description };
+    try {
+        const res = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || res.statusText);
+        }
+        closeDepartmentModal();
+        loadDepartments();
+        showNotification(id ? 'Department updated' : 'Department created', 'success');
+    } catch (e) {
+        showNotification(e.message || 'Error', 'error');
+    }
+}
+
+async function deleteDepartment(id, name) {
+    if (!confirm(`Delete department "${name}"? Cannot delete if it has users.`)) return;
+    try {
+        const res = await fetch(`/api/departments/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
+        if (res.status === 400) {
+            const data = await res.json().catch(() => ({}));
+            showNotification(data.detail || 'Cannot delete: department has users', 'error');
+            return;
+        }
+        if (!res.ok) throw new Error(res.statusText);
+        loadDepartments();
+        showNotification('Department deleted', 'success');
+    } catch (e) {
+        showNotification(e.message || 'Error', 'error');
+    }
+}
+
 // Alert functions
 async function loadAlerts(page = 1) {
     try {
@@ -1658,7 +1878,11 @@ function displayAlerts(alerts) {
     }
     
     if (alerts.length === 0) {
-        list.innerHTML = '<div class="empty-state"><p>No alerts found. All clear!</p></div>';
+        list.innerHTML = `
+            <div class="empty-state">
+                <p><strong>No alerts found. All clear!</strong></p>
+                <p class="empty-state-hint">Alerts appear when a policy is violated (e.g. sensitive data in analyzed text or test email). On a new installation, run Analysis or send a test email with sensitive content, then click Refresh.</p>
+            </div>`;
         return;
     }
     
@@ -1674,6 +1898,7 @@ function displayAlerts(alerts) {
                         <th>Severity</th>
                         <th>Status</th>
                         <th>Source</th>
+                        <th>To</th>
                         <th>Action</th>
                         <th>Created</th>
                     </tr>
@@ -1715,13 +1940,11 @@ function displayAlerts(alerts) {
             ? '<span class="badge badge-danger">Blocked</span>'
             : '<span class="badge badge-info">' + actionTaken + '</span>';
         
-        const createdDate = new Date(alert.created_at);
-        const formattedDate = createdDate.toLocaleDateString('en-US', { 
-            month: 'short', 
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+        const formattedDate = formatAlertTimeLocal(alert.created_at, alert.created_at_server);
+        
+        const toRecipients = (alert.extra_data && alert.extra_data.to) 
+            ? (Array.isArray(alert.extra_data.to) ? alert.extra_data.to.join(', ') : String(alert.extra_data.to)) 
+            : '—';
         
         const fullDescription = descriptionText || 'No description available';
         const alertData = {
@@ -1736,6 +1959,7 @@ function displayAlerts(alerts) {
             action_taken: alert.action_taken,
             blocked: alert.blocked,
             created_at: alert.created_at,
+            created_at_server: alert.created_at_server,
             detected_entities: alert.detected_entities || []
         };
         
@@ -1746,6 +1970,7 @@ function displayAlerts(alerts) {
                 <td><span class="badge ${severityBadge}">${alert.severity}</span></td>
                 <td><span class="badge ${statusBadge}">${alert.status}</span></td>
                 <td><span class="text-muted">${sourceInfo}</span></td>
+                <td><span class="text-muted">${toRecipients}</span></td>
                 <td>${actionBadge}</td>
                 <td><span class="text-muted">${formattedDate}</span></td>
             </tr>
@@ -1881,14 +2106,7 @@ function showAlertDetails(alertId, alertData) {
         ? alert.detected_entities.map(e => `${e.entity_type || e.type || 'Unknown'}: ${e.value || 'N/A'}`).join('<br>')
         : 'None';
     
-    const createdDate = new Date(alert.created_at);
-    const formattedDate = createdDate.toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    });
+    const formattedDate = formatAlertTimeLocal(alert.created_at, alert.created_at_server);
     
     // Use policy_name from API response if available, otherwise extract from title
     // Title is now the policy name directly
@@ -1973,6 +2191,10 @@ function showAlertDetails(alertId, alertData) {
                         <h4>Source</h4>
                         <p class="detail-value">${sourceInfo}</p>
                     </div>
+                    ${(alert.attachment_names && alert.attachment_names.length) ? `<div class="detail-section">
+                        <h4>Attachments</h4>
+                        <p class="detail-value">${alert.attachment_names.map(n => escapeHtml(n)).join(', ')}</p>
+                    </div>` : ''}
                     <div class="detail-section">
                         <h4>Detected Entities</h4>
                         <div class="entities-container ${!hasEntities ? 'entities-empty' : ''}">${entitiesHtml}</div>
@@ -2002,7 +2224,7 @@ function closeDetailsModal(event) {
     if (event && event.target !== event.currentTarget) {
         return;
     }
-    const modals = document.querySelectorAll('#policyDetailsModal, #alertDetailsModal');
+    const modals = document.querySelectorAll('#policyDetailsModal, #alertDetailsModal, #userActivityModal, #operationDetailsModal, #emailDetailModal');
     modals.forEach(modal => {
         modal.classList.remove('show');
         setTimeout(() => modal.remove(), 300);
@@ -2307,10 +2529,11 @@ function displayMonitoringLogs(logs) {
         return;
     }
     
-    let html = '<h3 style="margin-top: 24px; margin-bottom: 16px;">Recent Logs</h3><div class="table-container"><table class="logs-table"><thead><tr><th>Time</th><th>Event Type</th><th>Level</th><th>Message</th><th>Source</th></tr></thead><tbody>';
+    let html = '<h3 style="margin-top: 24px; margin-bottom: 16px;">Recent Logs</h3><div class="table-container"><table class="logs-table"><thead><tr><th>Time</th><th>Event Type</th><th>Level</th><th>Message</th><th>Source</th><th>To</th></tr></thead><tbody>';
     
     logs.forEach(log => {
-        const time = log.created_at ? new Date(log.created_at).toLocaleString() : 'N/A';
+        const time = log.created_at_server || (log.created_at ? new Date(log.created_at).toLocaleString() : 'N/A');
+        const toRecipients = (log.metadata && log.metadata.to) ? (Array.isArray(log.metadata.to) ? log.metadata.to.join(', ') : String(log.metadata.to)) : '—';
         html += `
             <tr>
                 <td>${time}</td>
@@ -2318,12 +2541,334 @@ function displayMonitoringLogs(logs) {
                 <td><span class="badge badge-${log.level === 'error' ? 'danger' : log.level === 'warning' ? 'warning' : 'info'}">${log.level || 'info'}</span></td>
                 <td>${log.message || 'N/A'}</td>
                 <td>${log.source_user || log.source_ip || 'N/A'}</td>
+                <td><span class="text-muted">${toRecipients}</span></td>
             </tr>
         `;
     });
     
     html += '</tbody></table></div>';
     container.innerHTML = html;
+}
+
+let currentMonitoringUsersPage = 1;
+let monitoringUsersPagination = { total: 0, total_pages: 0, limit: 10 };
+let lastMonitoringUserSearch = '';
+
+async function searchMonitoringUsers(page = 1) {
+    const input = document.getElementById('monitoringUserSearchInput');
+    const query = input ? input.value.trim() : '';
+    if (!query) {
+        const container = document.getElementById('monitoringUsersList');
+        if (container) {
+            container.innerHTML = '<div class="empty-state"><p>Type an email or username to search.</p></div>';
+        }
+        return;
+    }
+    await loadMonitoringUsers(query, page);
+}
+
+async function loadMonitoringUsers(searchQuery, page = 1) {
+    if (!authToken || !currentUser || currentUser.role !== 'admin') {
+        showNotification('Admin access required', 'error');
+        return;
+    }
+    const query = (searchQuery || '').trim();
+    if (!query) return;
+
+    try {
+        lastMonitoringUserSearch = query;
+        currentMonitoringUsersPage = page;
+        const params = new URLSearchParams();
+        params.append('search', query);
+        params.append('page', String(page));
+        params.append('limit', String(monitoringUsersPagination.limit));
+
+        const response = await fetch(`/api/users/?${params.toString()}`, {
+            headers: getAuthHeaders()
+        });
+        if (!response.ok) {
+            if (response.status === 401) {
+                logout();
+                throw new Error('Session expired. Please login again.');
+            }
+            throw new Error('Failed to search users');
+        }
+
+        const data = await response.json();
+        const users = Array.isArray(data) ? data : (data.items || []);
+        monitoringUsersPagination = {
+            total: data.total || users.length,
+            total_pages: data.total_pages || 1,
+            limit: data.limit || monitoringUsersPagination.limit,
+            has_next: data.has_next || false,
+            has_prev: data.has_prev || false
+        };
+
+        displayMonitoringUsers(users);
+        renderPagination('monitoringUsers', currentMonitoringUsersPage, monitoringUsersPagination, loadMonitoringUsersPage);
+    } catch (error) {
+        showNotification('Error searching users: ' + error.message, 'error');
+    }
+}
+
+function loadMonitoringUsersPage(page) {
+    return loadMonitoringUsers(lastMonitoringUserSearch, page);
+}
+
+function displayMonitoringUsers(users) {
+    const container = document.getElementById('monitoringUsersList');
+    if (!container) return;
+
+    if (!Array.isArray(users) || users.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>No matching users found.</p></div>';
+        return;
+    }
+
+    let html = `
+        <div class="table-container">
+            <table class="users-table">
+                <thead>
+                    <tr>
+                        <th>User</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Status</th>
+                        <th>Activity</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    users.forEach(user => {
+        const status = user.status || 'unknown';
+        const statusBadge = status === 'active' || status === 'approved'
+            ? '<span class="badge badge-success">' + status + '</span>'
+            : status === 'pending'
+            ? '<span class="badge badge-warning">' + status + '</span>'
+            : '<span class="badge badge-secondary">' + status + '</span>';
+        const roleBadge = user.role === 'admin'
+            ? '<span class="badge badge-danger">admin</span>'
+            : '<span class="badge badge-info">regular</span>';
+
+        html += `
+            <tr class="table-row-clickable" data-user-id="${user.id}" onclick="showUserActivityModal('${user.id}')">
+                <td><strong>${user.username || 'N/A'}</strong></td>
+                <td>${user.email || 'N/A'}</td>
+                <td>${roleBadge}</td>
+                <td>${statusBadge}</td>
+                <td>
+                    <button class="btn btn-secondary btn-small" onclick="event.stopPropagation(); showUserActivityModal('${user.id}')">
+                        View Activity
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+async function showUserActivityModal(userId) {
+    if (!userId) return;
+    try {
+        const response = await fetch(`/api/monitoring/user-activities/${encodeURIComponent(userId)}?days=30`, {
+            headers: getAuthHeaders()
+        });
+        if (!response.ok) {
+            throw new Error('Failed to load user activity');
+        }
+        const data = await response.json();
+        const operations = (data.operations && Array.isArray(data.operations.all)) ? data.operations.all : [];
+        const summary = data.summary || {};
+
+        const escapeHtml = (value) => {
+            const div = document.createElement('div');
+            div.textContent = value == null ? '' : String(value);
+            return div.innerHTML;
+        };
+
+        const operationsRows = operations.length
+            ? operations.map((op, idx) => {
+                const metadata = op.metadata ? JSON.stringify(op.metadata, null, 2) : '';
+                const time = op.timestamp_server || (op.timestamp ? new Date(op.timestamp).toLocaleString() : 'N/A');
+                const fileDisplay = op.file_name || (op.metadata && op.metadata.attachment_names && op.metadata.attachment_names.length ? op.metadata.attachment_names.join(', ') : 'N/A');
+                const toRecipients = (op.metadata && op.metadata.to) ? (Array.isArray(op.metadata.to) ? op.metadata.to.join(', ') : String(op.metadata.to)) : '—';
+                return `
+                    <tr class="table-row-clickable" data-op-index="${idx}" title="Click to view operation details">
+                        <td>${escapeHtml(op.event_type || 'N/A')}</td>
+                        <td>${escapeHtml(op.message || 'N/A')}</td>
+                        <td>${escapeHtml(time)}</td>
+                        <td>${escapeHtml(op.source_ip || 'N/A')}</td>
+                        <td><span class="text-muted">${escapeHtml(toRecipients)}</span></td>
+                        <td>${escapeHtml(fileDisplay)}</td>
+                        <td><pre class="activity-metadata">${escapeHtml(metadata || '—')}</pre></td>
+                    </tr>
+                `;
+            }).join('')
+            : '<tr><td colspan="7" class="text-muted">No operations found for this period.</td></tr>';
+
+        window._lastUserActivityOperations = operations;
+        window._lastUserActivityUser = { username: data.username || '', email: data.email || '' };
+
+        const modalHtml = `
+            <div class="modal-overlay show" id="userActivityModal" onclick="closeDetailsModal(event)">
+                <div class="modal-content" style="max-width: 1100px;" onclick="event.stopPropagation()">
+                    <div class="modal-header">
+                        <h3>User Activity Log</h3>
+                        <button class="close-btn" onclick="closeDetailsModal()">&times;</button>
+                    </div>
+                    <div style="padding: 20px; overflow:auto;">
+                        <div class="stats-grid" style="margin-bottom: 16px;">
+                            <div class="stat-card"><p>User</p><h3>${escapeHtml(data.username || 'N/A')}</h3></div>
+                            <div class="stat-card"><p>Email</p><h3>${escapeHtml(data.email || 'N/A')}</h3></div>
+                            <div class="stat-card"><p>Total Operations</p><h3>${summary.total_operations || 0}</h3></div>
+                            <div class="stat-card"><p>Analysis Operations</p><h3>${summary.analysis_operations || 0}</h3></div>
+                        </div>
+                        <p class="text-muted" style="margin-bottom: 8px; font-size: 0.9rem;">Click a row to view operation details, policy violated, and related data.</p>
+                        <div class="table-container">
+                            <table class="logs-table">
+                                <thead>
+                                    <tr>
+                                        <th>Event Type</th>
+                                        <th>Message</th>
+                                        <th>Timestamp</th>
+                                        <th>Source IP</th>
+                                        <th>To</th>
+                                        <th>File</th>
+                                        <th>Metadata</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${operationsRows}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-actions" style="padding: 16px 20px; border-top: 1px solid #e5e7eb;">
+                        <button class="btn btn-secondary" onclick="closeDetailsModal()">Close</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const existing = document.getElementById('userActivityModal');
+        if (existing) existing.remove();
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+        document.querySelectorAll('#userActivityModal tr.table-row-clickable').forEach(tr => {
+            tr.addEventListener('click', function () {
+                const idx = parseInt(this.getAttribute('data-op-index'), 10);
+                if (!isNaN(idx) && window._lastUserActivityOperations && window._lastUserActivityOperations[idx]) {
+                    showOperationDetailsModal(window._lastUserActivityOperations[idx], window._lastUserActivityUser);
+                }
+            });
+        });
+    } catch (error) {
+        showNotification('Error loading user activity: ' + error.message, 'error');
+    }
+}
+
+function showOperationDetailsModal(operation, userInfo) {
+    if (!operation) return;
+    const escapeHtml = (value) => {
+        const div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
+    };
+    const meta = operation.metadata || {};
+    const policyNames = operation.policy_names || [];
+    const hasPolicyViolation = policyNames.length > 0;
+    const blocked = meta.blocked === true;
+    const entityCount = meta.detected_entities_count != null ? meta.detected_entities_count : 0;
+    const entityTypes = meta.detected_entity_types || [];
+    const sourceUser = operation.source_user || userInfo.username || userInfo.email || 'N/A';
+    const sourceInfo = sourceUser + (operation.source_ip ? ' @ ' + operation.source_ip : '');
+    const formattedDate = operation.timestamp_server || (operation.timestamp
+        ? new Date(operation.timestamp).toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : 'N/A');
+    const title = (operation.event_type || 'Operation').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const actionTaken = blocked ? 'Blocked' : (hasPolicyViolation ? 'Policy applied' : 'Logged');
+    const actionClass = blocked ? 'danger' : hasPolicyViolation ? 'warning' : 'info';
+    let entitiesHtml = '';
+    if (entityCount > 0 || entityTypes.length > 0) {
+        const types = entityTypes.length ? entityTypes : (entityCount > 0 ? ['See metadata'] : []);
+        entitiesHtml = types.map(t => `<div class="entity-item"><span class="entity-type-badge">${escapeHtml(t)}</span></div>`).join('');
+        if (entityCount > 0 && !entityTypes.length) {
+            entitiesHtml = `<div class="entity-item"><span class="entity-type-badge">Count</span><span class="entity-value">${entityCount} detected</span></div>` + entitiesHtml;
+        }
+    } else {
+        entitiesHtml = '<span class="text-muted">No entity details in this log</span>';
+    }
+    const policySection = hasPolicyViolation
+        ? `<div class="detail-section">
+            <h4>Policy / Policies Violated</h4>
+            <p class="detail-value">${policyNames.map(p => escapeHtml(p)).join(', ')}</p>
+          </div>`
+        : (meta.policies_applied === 0 ? '<div class="detail-section"><h4>Policy</h4><p class="text-muted">No matching policy (entities detected but no policy matched)</p></div>' : '');
+    const fileSection = operation.file_name
+        ? `<div class="detail-section"><h4>File</h4><p class="detail-value">${escapeHtml(operation.file_name)}${operation.file_size ? ' (' + operation.file_size + ' bytes)' : ''}</p></div>`
+        : '';
+    const attachmentNames = meta.attachment_names || [];
+    const attachmentSection = attachmentNames.length
+        ? `<div class="detail-section"><h4>Attachments</h4><p class="detail-value">${attachmentNames.map(n => escapeHtml(n)).join(', ')}</p></div>`
+        : '';
+    const networkSection = operation.network_destination
+        ? `<div class="detail-section"><h4>Network</h4><p class="detail-value">${escapeHtml(operation.network_destination)}${operation.network_protocol ? ' (' + operation.network_protocol + ')' : ''}</p></div>`
+        : '';
+    const modalHtml = `
+        <div class="modal-overlay show" id="operationDetailsModal" onclick="closeDetailsModal(event)">
+            <div class="modal-content alert-details-modal" onclick="event.stopPropagation()">
+                <div class="alert-modal-header">
+                    <div class="alert-header-content">
+                        <h2 class="alert-incident-title">${escapeHtml(title)}</h2>
+                        <p class="alert-policy-name">Operation details</p>
+                    </div>
+                    <button class="close-btn alert-close-btn" onclick="closeDetailsModal()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+                <div class="alert-summary-section">
+                    <div class="summary-row">
+                        <div class="summary-item">
+                            <span class="summary-label">Action</span>
+                            <span class="badge badge-${actionClass}">${actionTaken}</span>
+                        </div>
+                        ${blocked ? '<div class="summary-item"><span class="summary-label">Blocked</span><span class="badge badge-danger">Yes</span></div>' : ''}
+                    </div>
+                </div>
+                <div class="alert-details-section">
+                    <div class="detail-section">
+                        <h4>Description</h4>
+                        <p class="detail-value">${escapeHtml(operation.message || 'N/A')}</p>
+                    </div>
+                    <div class="detail-section">
+                        <h4>Source</h4>
+                        <p class="detail-value">${escapeHtml(sourceInfo)}</p>
+                    </div>
+                    ${policySection}
+                    <div class="detail-section">
+                        <h4>Detected Entities</h4>
+                        <div class="entities-container">${entitiesHtml}</div>
+                    </div>
+                    ${fileSection}
+                    ${attachmentSection}
+                    ${networkSection}
+                    <div class="detail-section">
+                        <h4>Created At</h4>
+                        <p class="detail-value">${formattedDate}</p>
+                    </div>
+                </div>
+                <div class="alert-modal-actions">
+                    <button onclick="closeDetailsModal()" class="btn btn-secondary">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+    const existingModal = document.getElementById('operationDetailsModal');
+    if (existingModal) existingModal.remove();
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
 }
 
 // Pagination rendering function
@@ -2461,12 +3006,27 @@ function closeEmailModal() {
     // No longer needed - using tab instead of modal
 }
 
+/** Read a File as base64 string (for email attachments) */
+function readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const dataUrl = reader.result;
+            const base64 = dataUrl.indexOf(',') >= 0 ? dataUrl.split(',')[1] : dataUrl;
+            resolve(base64 || null);
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+    });
+}
+
 function resetEmailForm() {
     const emailTo = document.getElementById('emailTo');
     const emailSubject = document.getElementById('emailSubject');
     const emailBody = document.getElementById('emailBody');
     const emailTestResult = document.getElementById('emailTestResult');
     const emailFrom = document.getElementById('emailFrom');
+    const emailAttachments = document.getElementById('emailAttachments');
     
     // Reset all fields except emailFrom (which is disabled and auto-filled)
     if (emailTo) emailTo.value = 'external@example.com';
@@ -2480,6 +3040,7 @@ Address: 123 Main St, City, State 12345
 
 Best regards,
 Employee`;
+    if (emailAttachments) emailAttachments.value = '';
     // Keep emailFrom as current user's email (don't reset it)
     if (emailFrom && currentUser && currentUser.email) {
         emailFrom.value = currentUser.email;
@@ -2490,6 +3051,171 @@ Employee`;
     }
 }
 
+async function loadEmailList(page) {
+    const container = document.getElementById('emailListContainer');
+    if (!container) return;
+    container.innerHTML = '<p class="text-muted">Loading...</p>';
+    try {
+        const headers = getAuthHeaders();
+        const response = await fetch(`/api/monitoring/email/list?page=${page || 1}&limit=20`, { headers });
+        if (!response.ok) {
+            if (response.status === 401) {
+                container.innerHTML = '<p class="text-muted">Sign in to see emails sent to you.</p>';
+                return;
+            }
+            throw new Error(response.statusText || 'Failed to load');
+        }
+        const data = await response.json();
+        const logs = data.logs || [];
+        if (logs.length === 0) {
+            container.innerHTML = '<p class="text-muted">No emails sent to you yet.</p>';
+            return;
+        }
+        const escapeHtml = (v) => {
+            const d = document.createElement('div');
+            d.textContent = v == null ? '' : String(v);
+            return d.innerHTML;
+        };
+        let html = '<div class="table-container"><table class="logs-table"><thead><tr><th>From</th><th>To</th><th>Subject</th><th>Date</th><th>Attachments</th></tr></thead><tbody>';
+        logs.forEach(log => {
+            const ed = log.email_data || {};
+            const from = ed.from || '—';
+            const to = Array.isArray(ed.to) ? ed.to.join(', ') : (ed.to || '—');
+            const subject = ed.subject || '—';
+            const date = log.created_at_server || (log.created_at ? new Date(log.created_at).toLocaleString() : '—');
+            const attCount = ed.attachment_count > 0 ? ed.attachment_count : (ed.attachment_names && ed.attachment_names.length ? ed.attachment_names.length : 0);
+            const attLabel = attCount > 0 ? attCount + ' file(s)' : '—';
+            html += `<tr class="table-row-clickable" data-log-id="${escapeHtml(log.id)}" title="Click to view email">`;
+            html += `<td>${escapeHtml(from)}</td><td>${escapeHtml(to)}</td><td>${escapeHtml(subject)}</td><td>${escapeHtml(date)}</td><td>${escapeHtml(attLabel)}</td></tr>`;
+        });
+        html += '</tbody></table></div>';
+        if (data.total > 20) {
+            const totalPages = Math.ceil(data.total / 20) || 1;
+            html += '<div class="pagination" style="margin-top:12px;">';
+            for (let p = 1; p <= Math.min(totalPages, 10); p++) {
+                html += `<button type="button" class="btn btn-secondary btn-small" ${p === page ? 'disabled' : ''} onclick="loadEmailList(${p})">${p}</button> `;
+            }
+            html += '</div>';
+        }
+        container.innerHTML = html;
+        container.querySelectorAll('tr.table-row-clickable').forEach(tr => {
+            tr.addEventListener('click', function () {
+                const logId = this.getAttribute('data-log-id');
+                const log = logs.find(l => String(l.id) === logId);
+                if (log) showEmailDetailModal(log);
+            });
+        });
+    } catch (e) {
+        container.innerHTML = `<p class="text-danger">Error: ${(e.message || String(e)).replace(/</g, '&lt;')}</p>`;
+    }
+}
+
+function showEmailDetailModal(log) {
+    if (!log || !log.email_data) return;
+    const ed = log.email_data;
+    const escapeHtml = (v) => {
+        const d = document.createElement('div');
+        d.textContent = v == null ? '' : String(v);
+        return d.innerHTML;
+    };
+    const from = ed.from || '—';
+    const to = Array.isArray(ed.to) ? ed.to.join(', ') : (ed.to || '—');
+    const subject = ed.subject || '—';
+    const date = log.created_at_server || (log.created_at ? new Date(log.created_at).toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
+    const attachmentNames = ed.attachment_names || [];
+    const attachmentsHtml = attachmentNames.length
+        ? '<p class="detail-value">' + attachmentNames.map(n => escapeHtml(n)).join(', ') + '</p>'
+        : '<p class="text-muted">None</p>';
+    const bodyPreview = ed.encrypted_body != null ? ed.encrypted_body : ed.body_preview;
+    const bodyLabel = ed.encrypted_body != null ? 'Body (encrypted)' : 'Body';
+    const bodyHtml = bodyPreview
+        ? '<pre class="activity-metadata" style="max-height:200px;overflow:auto;white-space:pre-wrap;">' + escapeHtml(bodyPreview) + '</pre>'
+        : '<p class="text-muted">Body was not stored.</p>';
+    const modalHtml = `
+        <div class="modal-overlay show" id="emailDetailModal" onclick="closeDetailsModal(event)">
+            <div class="modal-content alert-details-modal" style="max-width:560px;" onclick="event.stopPropagation()">
+                <div class="alert-modal-header">
+                    <div class="alert-header-content">
+                        <h2 class="alert-incident-title">Email</h2>
+                    </div>
+                    <button class="close-btn alert-close-btn" onclick="closeDetailsModal()">&times;</button>
+                </div>
+                <div class="alert-details-section">
+                    <div class="detail-section"><h4>From</h4><p class="detail-value">${escapeHtml(from)}</p></div>
+                    <div class="detail-section"><h4>To</h4><p class="detail-value">${escapeHtml(to)}</p></div>
+                    <div class="detail-section"><h4>Subject</h4><p class="detail-value">${escapeHtml(subject)}</p></div>
+                    <div class="detail-section"><h4>Date</h4><p class="detail-value">${escapeHtml(date)}</p></div>
+                    <div class="detail-section"><h4>Attachments</h4>${attachmentsHtml}</div>
+                    <div class="detail-section"><h4>${bodyLabel}</h4>${bodyHtml}</div>
+                </div>
+                <div class="alert-modal-actions">
+                    <button onclick="closeDetailsModal()" class="btn btn-secondary">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+    const existing = document.getElementById('emailDetailModal');
+    if (existing) existing.remove();
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+async function decryptEmailContent(buttonElement) {
+    const modal = document.getElementById('emailDetailModal');
+    if (!modal) return;
+    const contentEl = modal.querySelector('[data-log-id]');
+    const logId = contentEl ? contentEl.getAttribute('data-log-id') : null;
+    if (!logId) {
+        showNotification('Cannot get email id.', 'error');
+        return;
+    }
+    const btn = buttonElement;
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Decrypting...';
+    const decryptedDiv = document.getElementById('emailDecryptedContent');
+    try {
+        const response = await fetch(`/api/monitoring/email/decrypt?log_id=${encodeURIComponent(logId)}`, {
+            headers: getAuthHeaders()
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.detail || response.statusText || 'Decrypt failed');
+        }
+        if (data.decrypted === false && data.message) {
+            if (decryptedDiv) {
+                decryptedDiv.innerHTML = '<p class="text-warning" style="margin:0;">' + (data.message || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p>';
+                decryptedDiv.style.display = 'block';
+            }
+            btn.disabled = false;
+            btn.textContent = originalText;
+            return;
+        }
+        const escapeHtml = (v) => {
+            const d = document.createElement('div');
+            d.textContent = v == null ? '' : String(v);
+            return d.innerHTML;
+        };
+        let html = '';
+        if (data.subject != null) {
+html += `<p><strong>Subject (original):</strong> ${escapeHtml(data.subject)}</p>`;
+        }
+        if (data.body != null) {
+            html += `<pre class="activity-metadata" style="max-height:200px;overflow:auto;white-space:pre-wrap;">${escapeHtml(data.body)}</pre>`;
+        }
+        if (!html) html = '<p class="text-muted">No content to display.</p>';
+        if (decryptedDiv) {
+decryptedDiv.innerHTML = '<p class="text-success" style="margin-bottom:8px;"><strong>Decrypted content:</strong></p>' + html;
+            decryptedDiv.style.display = 'block';
+        }
+        btn.style.display = 'none';
+showNotification('Decrypted successfully.', 'success');
+    } catch (e) {
+        showNotification(e.message || 'Decryption failed.', 'error');
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
+}
+
 async function testEmail(event) {
     event.preventDefault();
     
@@ -2497,6 +3223,7 @@ async function testEmail(event) {
     const toEmails = document.getElementById('emailTo').value.split(',').map(e => e.trim()).filter(e => e);
     const subject = document.getElementById('emailSubject').value;
     const body = document.getElementById('emailBody').value;
+    const fileInput = document.getElementById('emailAttachments');
     
     const emailData = {
         from: fromEmail,
@@ -2506,6 +3233,17 @@ async function testEmail(event) {
         source_ip: '127.0.0.1',
         source_user: fromEmail
     };
+    
+    // Read attachments as base64 if any
+    if (fileInput && fileInput.files && fileInput.files.length > 0) {
+        const attachments = [];
+        for (let i = 0; i < fileInput.files.length; i++) {
+            const file = fileInput.files[i];
+            const base64 = await readFileAsBase64(file);
+            if (base64) attachments.push({ filename: file.name, content: base64 });
+        }
+        if (attachments.length) emailData.attachments = attachments;
+    }
     
     const submitBtn = event.target.querySelector('button[type="submit"]');
     const originalText = submitBtn.textContent;
@@ -2534,6 +3272,9 @@ async function testEmail(event) {
         
         let resultHtml = '<div class="email-result">';
         resultHtml += `<h4>Email Analysis Result</h4>`;
+        if (emailData.attachments && emailData.attachments.length > 0) {
+resultHtml += `<p class="text-muted" style="margin-top:4px;">${emailData.attachments.length} attachment(s) analyzed with the email.</p>`;
+        }
         
         // Get analysis result (may be nested in analysis field)
         const analysis = result.analysis || result;
@@ -2580,14 +3321,22 @@ async function testEmail(event) {
                 resultHtml += '</div>';
             }
             
-            // Show action status
-            if (analysis.blocked || result.blocked) {
-                resultHtml += `<div class="alert-banner alert-warning" style="margin-bottom: 16px;">`;
-                resultHtml += `<strong>🚫 Email Blocked by Policy</strong>`;
+            // Show action status: block | alert | encrypt
+            const actionType = analysis.action || (analysis.blocked ? 'block' : (analysis.encrypted_text ? 'encrypt' : 'alert'));
+            if (actionType === 'block') {
+                resultHtml += `<div class="alert-banner alert-danger" style="margin-bottom: 16px;">`;
+                resultHtml += `<strong>🚫 Email Blocked (منع الإرسال)</strong>`;
+                resultHtml += `<p class="text-muted" style="margin-top: 8px; margin-bottom: 0;">Email blocked. Manager notified.</p>`;
                 resultHtml += `</div>`;
-            } else if (analysis.encrypted_text) {
+            } else if (actionType === 'encrypt') {
                 resultHtml += `<div class="alert-banner alert-success" style="margin-bottom: 16px;">`;
-                resultHtml += `<strong>🔒 Email Content Encrypted</strong>`;
+                resultHtml += `<strong>🔒 Email Allowed with Encryption (السماح مع التشفير)</strong>`;
+                resultHtml += `<p class="text-muted" style="margin-top: 8px; margin-bottom: 0;">Manager notified. You can send the email with the encrypted content below.</p>`;
+                resultHtml += `</div>`;
+            } else if (actionType === 'alert') {
+                resultHtml += `<div class="alert-banner alert-warning" style="margin-bottom: 16px;">`;
+                resultHtml += `<strong>📧 Email Allowed (السماح بالإرسال)</strong>`;
+                resultHtml += `<p class="text-muted" style="margin-top: 8px; margin-bottom: 0;">Email sent. Manager notified.</p>`;
                 resultHtml += `</div>`;
             }
             
@@ -2615,15 +3364,17 @@ async function testEmail(event) {
             }
             
             // Show encrypted text if available
-            if (analysis.encrypted_text) {
-                const escapedText = analysis.encrypted_text
+            // Show encrypted content (prefer encrypted_body = what recipient sees)
+            if (analysis.encrypted_text || analysis.encrypted_body) {
+                const contentToShow = analysis.encrypted_body != null ? analysis.encrypted_body : analysis.encrypted_text;
+                const escapedText = (contentToShow || '')
                     .replace(/&/g, '&amp;')
                     .replace(/</g, '&lt;')
                     .replace(/>/g, '&gt;')
                     .replace(/"/g, '&quot;')
                     .replace(/'/g, '&#39;');
                 
-                const textForCopy = analysis.encrypted_text
+                const textForCopy = (contentToShow || '')
                     .replace(/\\/g, '\\\\')
                     .replace(/'/g, "\\'")
                     .replace(/"/g, '\\"')
@@ -2636,14 +3387,15 @@ async function testEmail(event) {
                             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
                             <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                         </svg>
-                        Encrypted Email Content
+                        Content the recipient will receive
                     </h5>
+                    ${analysis.encrypted_subject ? `<p style="margin-bottom: 8px;"><strong>Subject:</strong> <code>${String(analysis.encrypted_subject).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></p>` : ''}
                     <div style="background: white; padding: 12px; border-radius: 4px; border: 1px solid var(--border); font-family: monospace; word-break: break-all; white-space: pre-wrap; max-height: 300px; overflow-y: auto;">
                         ${escapedText}
                     </div>
                     <button onclick="copyEncryptedText('${textForCopy}')" 
                             style="margin-top: 8px; padding: 6px 12px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem;">
-                        Copy Encrypted Text
+                        Copy encrypted content
                     </button>
                 </div>`;
             }
@@ -2665,7 +3417,19 @@ async function testEmail(event) {
         resultDiv.style.display = 'block';
         resultDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         
-        showNotification(result.blocked ? 'Email blocked - Sensitive data detected!' : 'Email analysis completed', result.blocked ? 'error' : 'success');
+        showNotification(
+            result.blocked || (analysis && analysis.blocked)
+                ? 'Email blocked. Manager notified.'
+                : (analysis && analysis.action === 'encrypt')
+                    ? 'Email allowed with encryption. Manager notified. You can send with encrypted content.'
+                    : (analysis && analysis.action === 'alert')
+                        ? 'Email allowed. Manager notified.'
+                        : 'Email analysis completed',
+            result.blocked || (analysis && analysis.blocked) ? 'error' : 'success'
+        );
+        
+        // Refresh inbox list so the new email appears
+        if (typeof loadEmailList === 'function') loadEmailList(1);
         
         // Reload email stats and logs (only if admin)
         if (currentUser && currentUser.role === 'admin') {
@@ -2794,8 +3558,9 @@ function updateAuthUI() {
             userInfo.style.display = 'flex';
             if (userName) userName.textContent = currentUser.username;
             if (userRole) {
-                userRole.textContent = currentUser.role === 'admin' ? 'Admin' : 'User';
-                userRole.className = `role-badge ${currentUser.role === 'admin' ? 'badge-danger' : 'badge-info'}`;
+                const roleLabel = currentUser.role === 'admin' ? 'Admin' : (currentUser.role === 'manager' ? 'Manager' : 'User');
+                userRole.textContent = roleLabel;
+                userRole.className = `role-badge ${currentUser.role === 'admin' ? 'badge-danger' : (currentUser.role === 'manager' ? 'badge-warning' : 'badge-info')}`;
             }
         }
 
@@ -2824,13 +3589,15 @@ function updateAuthUI() {
         };
         
         if (currentUser.role === 'admin') {
-            // Admin: Show all tabs
+            // Admin: Show all tabs (no separate Departments tab; it's a sub-tab under Users)
             showTabButton(policiesTabBtn);
             showTabButton(alertsTabBtn);
             showTabButton(monitoringTabBtn);
             showTabButton(testEmailTabBtn);
             showTabButton(usersTabBtn);
             showTabButton(analysisTabBtn);
+            const deptSubtab = document.getElementById('usersDepartmentsSubtabBtn');
+            if (deptSubtab) { deptSubtab.style.display = 'flex'; deptSubtab.style.visibility = 'visible'; }
             
             // Load admin data
             setTimeout(() => {
@@ -2841,16 +3608,32 @@ function updateAuthUI() {
             }, 300);
             // Start real-time notification polling for admin
             if (typeof startAdminNotificationPolling === 'function') startAdminNotificationPolling();
+        } else if (currentUser.role === 'manager') {
+            // Manager: Show Users, Analysis, Email only (no Policies, Alerts, Monitoring, Departments sub-tab)
+            if (typeof stopAdminNotificationPolling === 'function') stopAdminNotificationPolling();
+            hideTabButton(policiesTabBtn);
+            hideTabButton(alertsTabBtn);
+            hideTabButton(monitoringTabBtn);
+            showTabButton(usersTabBtn);
+            showTabButton(testEmailTabBtn);
+            showTabButton(analysisTabBtn);
+            const deptSubtab = document.getElementById('usersDepartmentsSubtabBtn');
+            if (deptSubtab) { deptSubtab.style.display = 'none'; }
+            setTimeout(() => {
+                if (typeof loadUsers === 'function') loadUsers(null, 1);
+            }, 300);
         } else {
-            // Regular user: Hide admin-only tabs (Policies, Alerts, Monitoring, Users)
+            // Regular user: Hide admin-only tabs (Policies, Alerts, Monitoring, Users, Departments)
             if (typeof stopAdminNotificationPolling === 'function') stopAdminNotificationPolling();
             // Regular users can only access: Analysis (File + Text) and Test Email
             hideTabButton(policiesTabBtn);
             hideTabButton(alertsTabBtn);
             hideTabButton(monitoringTabBtn);
             hideTabButton(usersTabBtn);
-            showTabButton(testEmailTabBtn); // Show Test Email tab
+            showTabButton(testEmailTabBtn); // Show Email tab (includes Test Email + Emails sent to you sub-tabs)
             showTabButton(analysisTabBtn); // Show Analysis tab
+            const deptSubtab = document.getElementById('usersDepartmentsSubtabBtn');
+            if (deptSubtab) { deptSubtab.style.display = 'none'; }
         }
         
         // Set user email in Test Email form (disabled field)
@@ -2879,6 +3662,8 @@ function updateAuthUI() {
             adminOnlySections.forEach(section => {
                 section.style.display = 'none';
             });
+            const decryptSubtab = document.getElementById('analysisDecryptSubtabBtn');
+            if (decryptSubtab) decryptSubtab.style.display = 'none';
         } else {
             // Show all content for admins
             const monitoringData = document.getElementById('monitoringData');
@@ -2890,6 +3675,8 @@ function updateAuthUI() {
             adminOnlySections.forEach(section => {
                 section.style.display = '';
             });
+            const decryptSubtabBtn = document.getElementById('analysisDecryptSubtabBtn');
+            if (decryptSubtabBtn) decryptSubtabBtn.style.display = 'flex';
         }
     } else {
         console.log('User is NOT logged in, showing overlay');
@@ -3068,6 +3855,8 @@ async function handleRegister(event) {
     const email = document.getElementById('registerEmail').value;
     const password = document.getElementById('registerPassword').value;
     const passwordConfirm = document.getElementById('registerPasswordConfirm').value;
+    const departmentIdEl = document.getElementById('registerDepartment');
+    const department_id = departmentIdEl ? departmentIdEl.value : '';
 
     if (password !== passwordConfirm) {
         showNotification('Passwords do not match', 'warning');
@@ -3093,14 +3882,27 @@ async function handleRegister(event) {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ username, email, password })
+            body: JSON.stringify({ username, email, password, department_id })
         });
 
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.indexOf("application/json") !== -1) {
             const data = await response.json();
             if (!response.ok) {
-                throw new Error(data.detail || 'Registration failed');
+                let msg = 'Registration failed';
+                if (data.detail) {
+                    if (Array.isArray(data.detail)) {
+                        msg = data.detail.map(function (e) {
+                            const loc = (e.loc && e.loc.filter(function (x) { return x !== 'body'; }).join('.')) || '';
+                            return (loc ? loc + ': ' : '') + (e.msg || String(e));
+                        }).join('. ');
+                    } else if (typeof data.detail === 'string') {
+                        msg = data.detail;
+                    } else {
+                        msg = JSON.stringify(data.detail);
+                    }
+                }
+                throw new Error(msg);
             }
 
             closeRegisterModal();
@@ -3249,6 +4051,22 @@ function showRegisterModal() {
         modal.style.pointerEvents = 'auto';
         modal.classList.add('show');
         
+        // Load departments for the dropdown (no auth required)
+        fetch('/api/departments/list')
+            .then(r => r.ok ? r.json() : [])
+            .then(list => {
+                const sel = document.getElementById('registerDepartment');
+                if (!sel) return;
+                sel.innerHTML = '<option value="">Select department...</option>';
+                (list || []).forEach(d => {
+                    const opt = document.createElement('option');
+                    opt.value = d.id;
+                    opt.textContent = d.name || d.id;
+                    sel.appendChild(opt);
+                });
+            })
+            .catch(() => {});
+        
         // Focus on username input
         setTimeout(() => {
             const usernameInput = document.getElementById('registerUsername');
@@ -3332,6 +4150,12 @@ async function fetchRecentAlertsAndShowDialogs() {
         if (!response.ok) {
             if (response.status === 401) {
                 stopAdminNotificationPolling();
+                authToken = null;
+                currentUser = null;
+                safeStorage.removeItem('authToken');
+                safeStorage.removeItem('currentUser');
+                updateAuthUI();
+                showNotification('Session expired or invalid. Please log in again.', 'warning');
             }
             return;
         }
@@ -3371,9 +4195,7 @@ function showAlertDialog(alert) {
     const policyName = (alert && (alert.policy_name || alert.title)) || '—';
     const clientName = (alert && alert.source_user) || 'Unknown';
     const desc = (alert && alert.description) || '';
-    const timeStr = (alert && alert.created_at)
-        ? new Date(alert.created_at).toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-        : '';
+    const timeStr = formatAlertTimeLocal(alert && alert.created_at, null);
     const severity = (alert && alert.severity) ? String(alert.severity) : 'medium';
     const status = (alert && alert.status) ? String(alert.status) : 'pending';
     const actionTaken = (alert && alert.blocked) ? 'Blocked' : (alert && alert.action_taken) || 'Alert';
@@ -3425,12 +4247,13 @@ function showAlertDialog(alert) {
                     <h4>Source</h4>
                     <p class="detail-value">${escapeHtml(clientName)}</p>
                 </div>
+                ${(alert.attachment_names && alert.attachment_names.length) ? `<div class="detail-section"><h4>Attachments</h4><p class="detail-value">${alert.attachment_names.map(n => escapeHtml(n)).join(', ')}</p></div>` : ''}
                 ${desc ? `<div class="detail-section"><h4>Description</h4><p class="detail-value">${escapeHtml(desc)}</p></div>` : ''}
                 <div class="detail-section">
                     <h4>Detected Entities</h4>
                     <div class="entities-container ${!hasEntities ? 'entities-empty' : ''}">${entitiesHtml}</div>
                 </div>
-                ${timeStr ? `<div class="detail-section"><h4>Created At</h4><p class="detail-value">${escapeHtml(timeStr)}</p></div>` : ''}
+                <div class="detail-section"><h4>Created At</h4><p class="detail-value">${escapeHtml(timeStr)}</p></div>
             </div>
             <div class="alert-modal-actions">
                 <button type="button" class="btn btn-primary alert-notification-btn-view">View Alerts</button>
@@ -3472,27 +4295,36 @@ function switchUsersView(view, buttonElement) {
     currentUsersView = view;
 
     // Update active tab
-    document.querySelectorAll('.sub-tab-btn').forEach(btn => {
+    document.querySelectorAll('#users .sub-tab-btn').forEach(btn => {
         btn.classList.remove('active');
     });
     if (buttonElement) {
         buttonElement.classList.add('active');
     }
 
-    // Load appropriate users
-    if (view === 'pending') {
-        loadPendingUsers();
-    } else if (view === 'active') {
-        loadUsers('active', 1);
+    const usersListEl = document.getElementById('usersList');
+    const departmentsSectionEl = document.getElementById('usersDepartmentsSection');
+
+    if (view === 'departments') {
+        if (usersListEl) usersListEl.style.display = 'none';
+        if (departmentsSectionEl) departmentsSectionEl.style.display = 'block';
+        if (typeof loadDepartments === 'function') loadDepartments();
     } else {
-        // Load all users with pagination
-        loadUsers(null, 1);
+        if (usersListEl) usersListEl.style.display = '';
+        if (departmentsSectionEl) departmentsSectionEl.style.display = 'none';
+        if (view === 'pending') {
+            loadPendingUsers();
+        } else if (view === 'active') {
+            loadUsers('active', 1);
+        } else {
+            loadUsers(null, 1);
+        }
     }
 }
 
 async function loadUsers(statusFilter = null, page = 1) {
-    if (!currentUser || currentUser.role !== 'admin') {
-        showNotification('Admin access required', 'error');
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
+        showNotification('Admin or manager access required', 'error');
         return;
     }
 
@@ -3554,8 +4386,8 @@ async function loadUsers(statusFilter = null, page = 1) {
 }
 
 async function loadPendingUsers() {
-    if (!currentUser || currentUser.role !== 'admin') {
-        showNotification('Admin access required', 'error');
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
+        showNotification('Admin or manager access required', 'error');
         return;
     }
 
@@ -3661,6 +4493,7 @@ function displayUsers(users) {
                         <th>User</th>
                         <th>Email</th>
                         <th>Role</th>
+                        <th>Department</th>
                         <th>Status</th>
                         <th>Account Status</th>
                         <th>Created</th>
@@ -3681,6 +4514,8 @@ function displayUsers(users) {
 
         const roleBadge = user.role === 'admin'
             ? '<span class="badge badge-danger">Admin</span>'
+            : user.role === 'manager'
+            ? '<span class="badge badge-warning">Department Manager</span>'
             : '<span class="badge badge-info">User</span>';
 
         const accountStatusBadge = user.is_active === false
@@ -3729,6 +4564,7 @@ function displayUsers(users) {
                     </div>
                 </td>
                 <td>${roleBadge}</td>
+                <td><span class="department-cell">${(user.department_name || '—')}</span></td>
                 <td>${statusBadge}</td>
                 <td>${accountStatusBadge}</td>
                 <td><span class="date-cell">${createdDate}</span></td>
@@ -3764,6 +4600,12 @@ function displayUsers(users) {
                                 </button>
                             `}
                         ` : ''}
+                        <button class="btn-icon btn-ghost" onclick="event.stopPropagation(); openEditUserModal('${user.id}')" title="Edit User">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                            </svg>
+                        </button>
                         <button class="btn-icon btn-delete" onclick="event.stopPropagation(); deleteUser('${user.id}')" title="Delete User">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polyline points="3 6 5 6 21 6"></polyline>
@@ -3879,6 +4721,86 @@ async function deleteUser(userId) {
     }
 }
 
+function closeEditUserModal() {
+    const modal = document.getElementById('editUserModal');
+    if (modal) {
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+        modal.setAttribute('aria-hidden', 'true');
+    }
+}
+
+async function openEditUserModal(userId) {
+    try {
+        const [userRes, deptRes] = await Promise.all([
+            fetch(`/api/users/${userId}`, { headers: getAuthHeaders() }),
+            fetch('/api/departments/', { headers: getAuthHeaders() })
+        ]);
+        if (!userRes.ok) {
+            if (userRes.status === 401 || userRes.status === 403) { logout(); return; }
+            showNotification('Failed to load user', 'error');
+            return;
+        }
+        const user = await userRes.json();
+        const departments = deptRes.ok ? await deptRes.json() : [];
+        document.getElementById('editUserId').value = user.id;
+        document.getElementById('editUserUsername').value = user.username || '';
+        document.getElementById('editUserEmail').value = user.email || '';
+        document.getElementById('editUserPassword').value = '';
+        const deptSel = document.getElementById('editUserDepartment');
+        deptSel.innerHTML = '<option value="">— None —</option>';
+        (departments || []).forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d.id;
+            opt.textContent = d.name || d.id;
+            if (user.department_id && String(d.id) === String(user.department_id)) opt.selected = true;
+            deptSel.appendChild(opt);
+        });
+        const roleSel = document.getElementById('editUserRole');
+        roleSel.value = user.role || 'regular';
+        if (currentUser && currentUser.role === 'manager') {
+            const adminOpt = roleSel.querySelector('option[value="admin"]');
+            if (adminOpt) adminOpt.remove();
+        }
+        const modal = document.getElementById('editUserModal');
+        if (modal) {
+            modal.classList.add('show');
+            modal.style.setProperty('display', 'flex', 'important');
+            modal.setAttribute('aria-hidden', 'false');
+        }
+    } catch (e) {
+        showNotification('Error loading user: ' + (e.message || 'Unknown'), 'error');
+    }
+}
+
+async function saveEditUser(event) {
+    event.preventDefault();
+    const userId = document.getElementById('editUserId').value;
+    const username = document.getElementById('editUserUsername').value.trim();
+    const email = document.getElementById('editUserEmail').value.trim();
+    const password = document.getElementById('editUserPassword').value;
+    const department_id = document.getElementById('editUserDepartment').value || null;
+    const role = document.getElementById('editUserRole').value;
+    const body = { username, email, role, department_id };
+    if (password) body.password = password;
+    try {
+        const res = await fetch(`/api/users/${userId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || res.statusText);
+        }
+        closeEditUserModal();
+        loadUsers();
+        showNotification('User updated', 'success');
+    } catch (e) {
+        showNotification(e.message || 'Error', 'error');
+    }
+}
+
 // Make functions globally available IMMEDIATELY
 // This must be done before DOMContentLoaded to ensure functions are available
 // CRITICAL: This IIFE must execute immediately when script loads
@@ -3982,6 +4904,22 @@ async function deleteUser(userId) {
             modal.style.pointerEvents = 'auto';
             modal.classList.add('show');
             
+            // Load departments for the dropdown (no auth required)
+            fetch('/api/departments/list')
+                .then(r => r.ok ? r.json() : [])
+                .then(list => {
+                    const sel = document.getElementById('registerDepartment');
+                    if (!sel) return;
+                    sel.innerHTML = '<option value="">Select department...</option>';
+                    (list || []).forEach(d => {
+                        const opt = document.createElement('option');
+                        opt.value = d.id;
+                        opt.textContent = d.name || d.id;
+                        sel.appendChild(opt);
+                    });
+                })
+                .catch(() => {});
+            
             // Focus on username input
             setTimeout(() => {
                 const usernameInput = document.getElementById('registerUsername');
@@ -4000,6 +4938,8 @@ async function deleteUser(userId) {
 window.analyzeText = analyzeText;
 window.showTab = showTab;
 window.switchAnalysisMode = switchAnalysisMode;
+window.decryptPastedContent = decryptPastedContent;
+window.switchEmailMode = switchEmailMode;
 window.closeLoginModal = closeLoginModal;
 window.closeRegisterModal = closeRegisterModal;
 window.handleLogin = handleLogin;
@@ -4023,6 +4963,11 @@ window.showPolicyDetails = showPolicyDetails;
 window.showAlertDetails = showAlertDetails;
 window.closeDetailsModal = closeDetailsModal;
 window.loadMonitoringData = loadMonitoringData;
+window.loadEmailList = loadEmailList;
+window.decryptEmailContent = decryptEmailContent;
+window.searchMonitoringUsers = searchMonitoringUsers;
+window.showUserActivityModal = showUserActivityModal;
+window.showOperationDetailsModal = showOperationDetailsModal;
 window.showCreatePolicyForm = showCreatePolicyForm;
 window.closeModal = closeModal;
 window.createPolicy = createPolicy;

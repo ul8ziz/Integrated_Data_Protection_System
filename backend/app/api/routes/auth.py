@@ -6,6 +6,7 @@ from datetime import datetime
 import logging
 from app.utils.datetime_utils import get_current_time
 from app.models_mongo.users import User, UserRole, UserStatus
+from app.models_mongo.departments import Department
 from app.schemas.users import (
     LoginRequest, TokenResponse, UserRegister, UserResponse
 )
@@ -56,6 +57,21 @@ async def register(
             detail="Password contains invalid characters or scripts"
         )
     
+    # Validate department exists
+    try:
+        department = await Department.get(user_data.department_id)
+        if not department:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid department"
+            )
+        department_name = department.name
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid department"
+        )
+    
     # Encode special characters
     encoded_username = encode_special_chars(sanitized_username)
     
@@ -83,7 +99,8 @@ async def register(
         hashed_password=hashed_password,
         role=UserRole.REGULAR,
         status=UserStatus.PENDING,
-        is_active=False  # Will be activated after approval
+        is_active=False,  # Will be activated after approval
+        department_id=user_data.department_id
     )
     
     await new_user.insert()
@@ -99,7 +116,9 @@ async def register(
         approved_at=new_user.approved_at,
         last_login=new_user.last_login,
         approved_by=str(new_user.approved_by) if new_user.approved_by else None,
-        rejection_reason=new_user.rejection_reason
+        rejection_reason=new_user.rejection_reason,
+        department_id=new_user.department_id,
+        department_name=department_name
     )
 
 
@@ -213,6 +232,14 @@ async def login(
         
         # Create user response
         try:
+            department_name = None
+            if getattr(user, "department_id", None):
+                try:
+                    dept = await Department.get(user.department_id)
+                    if dept:
+                        department_name = dept.name
+                except Exception:
+                    pass
             user_response = UserResponse(
                 id=str(user.id) if hasattr(user.id, '__str__') else user.id,
                 username=user.username,
@@ -224,7 +251,9 @@ async def login(
                 approved_at=user.approved_at,
                 last_login=user.last_login,
                 approved_by=str(user.approved_by) if user.approved_by else None,
-                rejection_reason=user.rejection_reason
+                rejection_reason=user.rejection_reason,
+                department_id=getattr(user, "department_id", None),
+                department_name=department_name
             )
         except Exception as e:
             logger.error(f"Error creating UserResponse: {e}")
@@ -269,6 +298,14 @@ async def get_current_user_info(
     """
     Get current user information
     """
+    department_name = None
+    if getattr(current_user, "department_id", None):
+        try:
+            dept = await Department.get(current_user.department_id)
+            if dept:
+                department_name = dept.name
+        except Exception:
+            pass
     return UserResponse(
         id=str(current_user.id),
         username=current_user.username,
@@ -280,7 +317,9 @@ async def get_current_user_info(
         approved_at=current_user.approved_at,
         last_login=current_user.last_login,
         approved_by=str(current_user.approved_by) if current_user.approved_by else None,
-        rejection_reason=current_user.rejection_reason
+        rejection_reason=current_user.rejection_reason,
+        department_id=getattr(current_user, "department_id", None),
+        department_name=department_name
     )
 
 

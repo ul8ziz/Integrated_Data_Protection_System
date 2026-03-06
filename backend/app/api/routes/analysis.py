@@ -1,7 +1,7 @@
 """
 API routes for text analysis
 """
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request, Body
 from typing import List, Optional
 import tempfile
 import os
@@ -10,7 +10,7 @@ from app.schemas.analysis import AnalysisRequest, AnalysisResponse, DetectedEnti
 from app.services.policy_service import PolicyService
 from app.services.presidio_service import PresidioService
 from app.services.file_extractor_service import FileTextExtractor
-from app.api.dependencies import get_optional_user
+from app.api.dependencies import get_optional_user, get_current_admin
 from app.models_mongo.logs import Log
 
 logger = logging.getLogger(__name__)
@@ -263,4 +263,28 @@ async def get_supported_file_formats():
             ".xlsx": "Microsoft Excel spreadsheets (2007+)"
         }
     }
+
+
+@router.post("/decrypt")
+async def decrypt_content(
+    body: dict = Body(...),
+    current_user = Depends(get_current_admin)
+):
+    """
+    Decrypt content that was encrypted by the system (فك التشفير). Admin only.
+    Body: { "content": "base64_encrypted_string" }
+    """
+    content = body.get("content") if isinstance(body, dict) else None
+    if not content or not isinstance(content, str) or not content.strip():
+        raise HTTPException(status_code=400, detail="content is required and must be a non-empty string")
+    try:
+        # Support mixed content: plain text + Fernet tokens (e.g. pasted email body with one encrypted phone)
+        decrypted = policy_service.encryption.decrypt_mixed_content(content.strip())
+        return {"decrypted": decrypted}
+    except Exception as e:
+        logger.warning(f"Decrypt failed: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or not encrypted content. Paste text encrypted by this system."
+        )
 

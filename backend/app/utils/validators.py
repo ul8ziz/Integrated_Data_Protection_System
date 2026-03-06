@@ -42,7 +42,8 @@ def validate_entity_types(entity_types: List[str]) -> bool:
     valid_entities = [
         "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "CREDIT_CARD",
         "ADDRESS", "ORGANIZATION", "DATE_TIME", "LOCATION",
-        "IBAN_CODE", "IP_ADDRESS", "MEDICAL_LICENSE", "US_SSN", "MALICIOUS_SCRIPT"
+        "IBAN_CODE", "IP_ADDRESS", "MEDICAL_LICENSE", "US_SSN", "MALICIOUS_SCRIPT",
+        "TAX", "STOCK", "PROFIT"
     ]
     return all(entity in valid_entities for entity in entity_types)
 
@@ -121,7 +122,7 @@ def validate_password_strength(password: str) -> tuple[bool, str]:
     Validate password strength
     
     Requirements:
-    - Minimum 12 characters
+    - Minimum 6 characters
     - At least one uppercase letter (A-Z)
     - At least one lowercase letter (a-z)
     - At least one digit (0-9)
@@ -133,8 +134,8 @@ def validate_password_strength(password: str) -> tuple[bool, str]:
     Returns:
         Tuple of (is_valid, error_message)
     """
-    if len(password) < 12:
-        return False, "Password must be at least 12 characters long"
+    if len(password) < 6:
+        return False, "Password must be at least 6 characters long"
     
     if not re.search(r'[A-Z]', password):
         return False, "Password must contain at least one uppercase letter"

@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database_mongo import init_mongodb, close_mongodb
 from app.api.routes import analysis, policies, alerts, monitoring
-from app.api.routes import email_receiver, auth, users
+from app.api.routes import email_receiver, auth, users, departments
 from app.middleware.mongodb_check import MongoDBCheckMiddleware
 from app.middleware.file_scanner import FileScannerMiddleware
 import logging
@@ -65,6 +65,7 @@ app.add_middleware(FileScannerMiddleware)
 # Include routers
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(departments.router)
 app.include_router(analysis.router)
 app.include_router(policies.router)
 app.include_router(alerts.router)
@@ -157,6 +158,14 @@ async def startup_event():
                 await create_default_policy()
             except Exception as e:
                 logger.error(f"Error creating default policy: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+            # Create default departments if they don't exist
+            try:
+                from app.scripts.create_default_departments import create_default_departments
+                await create_default_departments()
+            except Exception as e:
+                logger.error(f"Error creating default departments: {e}")
                 import traceback
                 logger.error(traceback.format_exc())
         else:

@@ -1,6 +1,7 @@
 """
 Encryption service for sensitive data using AES
 """
+import re
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -63,6 +64,28 @@ class EncryptionService:
             return ""
         decrypted = self.cipher.decrypt(encrypted_data.encode())
         return decrypted.decode()
+    
+    def decrypt_mixed_content(self, text: str) -> str:
+        """
+        Decrypt content that may contain both plain text and Fernet-encrypted tokens.
+        Finds all base64url tokens that look like Fernet (e.g. gAAAAA...), decrypts each,
+        and returns the text with tokens replaced by decrypted values.
+        """
+        if not text or not text.strip():
+            return text
+        # Fernet tokens are base64url: start with gAAAAA, then 35+ chars, optional = padding
+        pattern = re.compile(r"gAAAAA[A-Za-z0-9_-]{35,}=*")
+        result = text
+        # Process from end to start so positions don't shift
+        matches = list(pattern.finditer(result))
+        for m in reversed(matches):
+            token = m.group(0)
+            try:
+                decrypted = self.decrypt(token)
+                result = result[: m.start()] + decrypted + result[m.end() :]
+            except Exception:
+                pass
+        return result
     
     @staticmethod
     def hash_text(text: str) -> str:

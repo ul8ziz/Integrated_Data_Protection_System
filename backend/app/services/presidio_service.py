@@ -519,7 +519,133 @@ class PresidioService:
                 "value": match.group()
             })
         
+        # Tax patterns (الضرائب)
+        # Pattern 1: "Tax:" or "الضريبة:" or "VAT ID:" followed by value
+        tax_labeled_pattern = r'(?:Tax|VAT|الضريبة|رقم الضريبة|VAT ID|Tax ID)\s*:?\s*([^\n]{5,30})'
+        for match in re.finditer(tax_labeled_pattern, text, re.IGNORECASE):
+            tax_value = match.group(1).strip()
+            tax_value = re.sub(r'\s*\([^)]*\).*$', '', tax_value).strip()
+            if len(tax_value) >= 5:
+                detected_entities.append({
+                    "entity_type": "TAX",
+                    "start": match.start(1),
+                    "end": match.end(1),
+                    "score": 0.85,
+                    "value": tax_value
+                })
+        # Pattern 2: Saudi VAT number (SA + 9 digits) or tax percentage
+        tax_sa_pattern = r'\b(SA\d{9})\b'
+        for match in re.finditer(tax_sa_pattern, text):
+            detected_entities.append({
+                "entity_type": "TAX",
+                "start": match.start(),
+                "end": match.end(),
+                "score": 0.9,
+                "value": match.group()
+            })
+        tax_pct_pattern = r'(?:Tax|الضريبة|VAT)\s*:?\s*(\d{1,3}(?:\.\d+)?\s*%)'
+        for match in re.finditer(tax_pct_pattern, text, re.IGNORECASE):
+            detected_entities.append({
+                "entity_type": "TAX",
+                "start": match.start(1),
+                "end": match.end(1),
+                "score": 0.8,
+                "value": match.group(1).strip()
+            })
+        
+        # Stock patterns (الأسهم)
+        # Pattern 1: Stock symbols (e.g. AAPL, MSFT, 2222.SR)
+        stock_symbol_pattern = r'\b([A-Z]{2,5}(?:\.[A-Z]{2})?)\b'
+        stock_keywords = r'(?:Stock|Share|سهم|أسهم|رمز السهم|Ticker)'
+        for match in re.finditer(stock_symbol_pattern, text):
+            value = match.group(1)
+            # Check context for stock-related keywords
+            ctx_start = max(0, match.start() - 40)
+            ctx_end = min(len(text), match.end() + 40)
+            context = text[ctx_start:ctx_end]
+            if re.search(stock_keywords, context, re.IGNORECASE) or re.search(r'\.(SR|SA|TADAWUL)', value):
+                detected_entities.append({
+                    "entity_type": "STOCK",
+                    "start": match.start(),
+                    "end": match.end(),
+                    "score": 0.8,
+                    "value": value
+                })
+        # Pattern 2: ISIN (2 letters + 10 alphanumeric)
+        isin_pattern = r'\b([A-Z]{2}[A-Z0-9]{9}\d)\b'
+        for match in re.finditer(isin_pattern, text):
+            detected_entities.append({
+                "entity_type": "STOCK",
+                "start": match.start(),
+                "end": match.end(),
+                "score": 0.85,
+                "value": match.group()
+            })
+        
+        # Profit patterns (الأرباح)
+        profit_labeled_pattern = r'(?:Profit|Revenue|الربح|صافي الدخل|الأرباح|Net Income|Gross Profit)\s*:?\s*([^\n]{3,50})'
+        for match in re.finditer(profit_labeled_pattern, text, re.IGNORECASE):
+            profit_value = match.group(1).strip()
+            profit_value = re.sub(r'\s*\([^)]*\).*$', '', profit_value).strip()
+            if len(profit_value) >= 3:
+                money_match = re.search(r'[\d,.]+\s*(?:USD|SAR|ريال|دولار|\$)?', profit_value)
+                if money_match:
+                    val = money_match.group().strip()
+                    start_off = match.start(1) + money_match.start()
+                    end_off = match.start(1) + money_match.end()
+                else:
+                    val = profit_value
+                    start_off = match.start(1)
+                    end_off = match.end(1)
+                detected_entities.append({
+                    "entity_type": "PROFIT",
+                    "start": start_off,
+                    "end": end_off,
+                    "score": 0.85,
+                    "value": val
+                })
+        
         return detected_entities
+    
+    def _detect_custom_financial_entities(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Detect TAX, STOCK, PROFIT - custom entities not supported by Presidio.
+        Used when Presidio is available to supplement its results.
+        """
+        detected = []
+        # Tax patterns
+        tax_labeled_pattern = r'(?:Tax|VAT|الضريبة|رقم الضريبة|VAT ID|Tax ID)\s*:?\s*([^\n]{5,30})'
+        for match in re.finditer(tax_labeled_pattern, text, re.IGNORECASE):
+            tax_value = match.group(1).strip()
+            tax_value = re.sub(r'\s*\([^)]*\).*$', '', tax_value).strip()
+            if len(tax_value) >= 5:
+                detected.append({"entity_type": "TAX", "start": match.start(1), "end": match.end(1), "score": 0.85, "value": tax_value})
+        for match in re.finditer(r'\b(SA\d{9})\b', text):
+            detected.append({"entity_type": "TAX", "start": match.start(), "end": match.end(), "score": 0.9, "value": match.group()})
+        for match in re.finditer(r'(?:Tax|الضريبة|VAT)\s*:?\s*(\d{1,3}(?:\.\d+)?\s*%)', text, re.IGNORECASE):
+            detected.append({"entity_type": "TAX", "start": match.start(1), "end": match.end(1), "score": 0.8, "value": match.group(1).strip()})
+        # Stock patterns
+        stock_keywords = r'(?:Stock|Share|سهم|أسهم|رمز السهم|Ticker)'
+        for match in re.finditer(r'\b([A-Z]{2,5}(?:\.[A-Z]{2})?)\b', text):
+            value = match.group(1)
+            ctx = text[max(0, match.start() - 40):min(len(text), match.end() + 40)]
+            if re.search(stock_keywords, ctx, re.IGNORECASE) or re.search(r'\.(SR|SA|TADAWUL)', value):
+                detected.append({"entity_type": "STOCK", "start": match.start(), "end": match.end(), "score": 0.8, "value": value})
+        for match in re.finditer(r'\b([A-Z]{2}[A-Z0-9]{9}\d)\b', text):
+            detected.append({"entity_type": "STOCK", "start": match.start(), "end": match.end(), "score": 0.85, "value": match.group()})
+        # Profit patterns
+        profit_labeled_pattern = r'(?:Profit|Revenue|الربح|صافي الدخل|الأرباح|Net Income|Gross Profit)\s*:?\s*([^\n]{3,50})'
+        for match in re.finditer(profit_labeled_pattern, text, re.IGNORECASE):
+            profit_value = match.group(1).strip()
+            profit_value = re.sub(r'\s*\([^)]*\).*$', '', profit_value).strip()
+            if len(profit_value) >= 3:
+                money_match = re.search(r'[\d,.]+\s*(?:USD|SAR|ريال|دولار|\$)?', profit_value)
+                if money_match:
+                    val, start_off, end_off = money_match.group().strip(), match.start(1) + money_match.start(), match.start(1) + money_match.end()
+                else:
+                    val, start_off, end_off = profit_value, match.start(1), match.end(1)
+                detected.append({"entity_type": "PROFIT", "start": start_off, "end": end_off, "score": 0.85, "value": val})
+        return detected
     
     def analyze(self, text: str, language: str = None) -> List[Dict[str, Any]]:
         """
@@ -544,16 +670,25 @@ class PresidioService:
         if malicious_scripts:
             logger.warning(f"Detected {len(malicious_scripts)} malicious script patterns in text")
         
+        # Presidio built-in entities (TAX, STOCK, PROFIT are custom - detected via regex)
+        PRESIDIO_BUILTIN = {
+            "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "CREDIT_CARD", "ADDRESS",
+            "ORGANIZATION", "DATE_TIME", "LOCATION", "IBAN_CODE", "IP_ADDRESS",
+            "US_SSN", "MEDICAL_LICENSE", "US_BANK_NUMBER", "US_ITIN", "CRYPTO",
+            "MAC_ADDRESS", "NRP", "URL"
+        }
+        
         # Use Presidio if available for sensitive data detection
         if self.analyzer is not None:
             try:
                 language = language or settings.PRESIDIO_LANGUAGE
+                entities_for_presidio = [e for e in self.supported_entities if e in PRESIDIO_BUILTIN]
                 
-                # Analyze text
+                # Analyze text with Presidio (only built-in entities)
                 results = self.analyzer.analyze(
                     text=text,
                     language=language,
-                    entities=self.supported_entities
+                    entities=entities_for_presidio if entities_for_presidio else self.supported_entities
                 )
                 
                 # Format results
@@ -565,6 +700,11 @@ class PresidioService:
                         "score": result.score,
                         "value": text[result.start:result.end]
                     })
+                
+                # Add custom financial entities (TAX, STOCK, PROFIT) via regex
+                if any(e in self.supported_entities for e in ("TAX", "STOCK", "PROFIT")):
+                    custom_financial = self._detect_custom_financial_entities(text)
+                    detected_entities.extend(custom_financial)
                 
                 logger.info(f"Detected {len(detected_entities)} entities in text (including {len(malicious_scripts)} scripts)")
                 return detected_entities

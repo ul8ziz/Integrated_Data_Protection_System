@@ -50,7 +50,7 @@ async def init_mongodb():
         database = client[settings.MONGODB_DB_NAME]
         
         # Import all models BEFORE init_beanie
-        from app.models_mongo import users, policies, alerts, logs
+        from app.models_mongo import users, policies, alerts, logs, departments
         
         logger.info("Initializing Beanie with document models...")
         
@@ -62,7 +62,8 @@ async def init_mongodb():
                 policies.Policy,
                 alerts.Alert,
                 logs.Log,
-                logs.DetectedEntity
+                logs.DetectedEntity,
+                departments.Department
             ]
         )
         

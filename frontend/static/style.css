@@ -1065,6 +1065,16 @@ header {
     display: block;
 }
 
+/* Email tab sub-sections (Test Email / Emails sent to you) */
+.email-mode-section {
+    display: none;
+    animation: fadeIn 0.3s ease-in;
+}
+
+.email-mode-section.active {
+    display: block;
+}
+
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -1348,6 +1358,33 @@ header {
 /* Users List */
 .users-list {
     margin-top: 24px;
+}
+
+.monitoring-user-search {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin: 16px 0 8px;
+}
+
+.monitoring-user-search input {
+    flex: 1;
+    min-width: 260px;
+    padding: 12px 14px;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+    font-size: 0.95rem;
+}
+
+.activity-metadata {
+    margin: 0;
+    max-width: 360px;
+    max-height: 180px;
+    overflow: auto;
+    white-space: pre-wrap;
+    font-size: 0.78rem;
+    line-height: 1.35;
+    color: #374151;
 }
 
 /* Users Table */
@@ -2814,6 +2851,16 @@ header {
 }
 
 /* Email Logs */
+.email-inbox-section .section-title {
+    font-size: 1.1rem;
+    margin-bottom: 12px;
+    color: var(--dark);
+}
+
+.email-list-container {
+    min-height: 80px;
+}
+
 .email-logs-container {
     margin-top: 24px;
 }
@@ -3033,7 +3080,14 @@ header {
     font-size: 1.1rem;
 }
 
-/* Responsive */
+.empty-state-hint {
+    font-size: 0.9rem !important;
+    color: var(--gray);
+    margin-top: 8px;
+    max-width: 420px;
+    margin-left: auto;
+    margin-right: auto;
+}
 @media (max-width: 768px) {
     .container {
         margin: 10px;

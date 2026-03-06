@@ -48,7 +48,9 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     """Schema for creating a new user"""
-    password: str = Field(..., min_length=12, max_length=100)
+    password: str = Field(..., min_length=6, max_length=100)
+    department_id: Optional[str] = None
+    role: Optional[UserRole] = None
     
     @field_validator('password')
     @classmethod
@@ -72,7 +74,7 @@ class UserCreate(UserBase):
 
 class UserRegister(UserCreate):
     """Schema for user registration (self-registration)"""
-    pass
+    department_id: str = Field(..., description="Department ID the user belongs to")
 
 
 class UserUpdate(BaseModel):
@@ -83,6 +85,7 @@ class UserUpdate(BaseModel):
     role: Optional[UserRole] = None
     status: Optional[UserStatus] = None
     is_active: Optional[bool] = None
+    department_id: Optional[str] = None
 
 
 class UserResponse(UserBase):
@@ -96,6 +99,8 @@ class UserResponse(UserBase):
     last_login: Optional[datetime] = None
     approved_by: Optional[str] = None  # MongoDB uses ObjectId (string)
     rejection_reason: Optional[str] = None
+    department_id: Optional[str] = None
+    department_name: Optional[str] = None
     
     class Config:
         from_attributes = True

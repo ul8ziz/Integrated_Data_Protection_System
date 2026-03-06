@@ -103,6 +103,24 @@ async def get_current_admin(
     return current_user
 
 
+async def get_current_admin_or_manager(
+    current_user: User = Depends(get_current_active_user)
+) -> User:
+    """
+    Get current user if they are admin or department manager.
+    Used for user management endpoints (list/create/update/approve/reject/suspend/activate/delete users).
+    
+    Raises:
+        HTTPException: If user is not admin or manager
+    """
+    if not current_user.is_manager():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin or manager access required"
+        )
+    return current_user
+
+
 async def get_optional_user(
     request: Request
 ) -> Optional[User]:

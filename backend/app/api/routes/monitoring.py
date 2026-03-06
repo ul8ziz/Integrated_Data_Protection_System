@@ -4,13 +4,13 @@ API routes for monitoring and reports
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from typing import Dict, Any
 from datetime import datetime, timedelta
-from app.utils.datetime_utils import get_current_time
+from app.utils.datetime_utils import get_current_time, format_datetime_server
 from app.models_mongo.logs import Log, DetectedEntity
 from app.models_mongo.alerts import Alert
 from app.models_mongo.policies import Policy
 from app.services.mydlp_service import MyDLPService
 from app.services.email_monitoring_service import EmailMonitoringService
-from app.api.dependencies import get_current_admin, get_optional_user
+from app.api.dependencies import get_current_admin, get_optional_user, get_current_user
 
 router = APIRouter(prefix="/api/monitoring", tags=["Monitoring"])
 
@@ -192,7 +192,8 @@ async def get_logs_report(
                     "level": log.level,
                     "source_ip": log.source_ip,
                     "source_user": log.source_user,
-                    "created_at": log.created_at.isoformat(),
+                    "created_at": log.created_at.isoformat() if log.created_at else None,
+                    "created_at_server": format_datetime_server(log.created_at),
                     "metadata": log.extra_data
                 }
                 for log in logs
@@ -227,7 +228,7 @@ async def monitor_email(
         "to": ["recipient@example.com"],
         "subject": "Email subject",
         "body": "Email body text",
-        "attachments": ["file1.pdf"],  # optional
+        "attachments": [{"filename": "file.pdf", "content": "base64_encoded_content"}],  # optional; content is extracted and analyzed
         "source_ip": "127.0.0.1",  # optional, defaults to 127.0.0.1
         "source_user": "user@example.com"  # optional
     }
@@ -280,7 +281,8 @@ async def get_email_logs(
                     "level": log.level,
                     "source_ip": log.source_ip,
                     "source_user": log.source_user,
-                    "created_at": log.created_at.isoformat(),
+                    "created_at": log.created_at.isoformat() if log.created_at else None,
+                    "created_at_server": format_datetime_server(log.created_at),
                     "email_data": log.extra_data
                 }
                 for log in logs
@@ -288,6 +290,93 @@ async def get_email_logs(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching email logs: {str(e)}")
+
+
+@router.get("/email/list")
+async def get_email_list_inbox(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    current_user = Depends(get_current_user)
+):
+    """
+    Get emails sent TO the current user (inbox).
+    Returns only logs where current user's email or username is in the 'to' list.
+    """
+    try:
+        recipient_identifiers = []
+        if getattr(current_user, "email", None):
+            recipient_identifiers.append(current_user.email)
+        if getattr(current_user, "username", None) and current_user.username not in recipient_identifiers:
+            recipient_identifiers.append(current_user.username)
+        if not recipient_identifiers:
+            return {"count": 0, "logs": [], "page": page, "limit": limit, "total": 0}
+
+        query = {
+            "event_type": "email_received",
+            "extra_data.to": {"$in": recipient_identifiers}
+        }
+        skip = (page - 1) * limit
+        total = await Log.find(query).count()
+        logs = await Log.find(query).sort("-created_at").skip(skip).limit(limit).to_list()
+
+        return {
+            "count": len(logs),
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "logs": [
+                {
+                    "id": str(log.id),
+                    "message": log.message,
+                    "level": log.level,
+                    "source_ip": log.source_ip,
+                    "source_user": log.source_user,
+                    "created_at": log.created_at.isoformat() if log.created_at else None,
+                    "created_at_server": format_datetime_server(log.created_at),
+                    "email_data": log.extra_data
+                }
+                for log in logs
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error fetching email list: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching email list: {str(e)}")
+
+
+@router.get("/email/decrypt")
+async def decrypt_email_for_recipient(
+    log_id: str = Query(..., description="Log ID of the email to decrypt"),
+    current_user = Depends(get_current_user)
+):
+    """
+    Decrypt the original body/subject of an email for the recipient (فك التشفير).
+    Only allowed if the current user is in the email's 'to' list.
+    """
+    recipient_identifiers = []
+    if getattr(current_user, "email", None):
+        recipient_identifiers.append(current_user.email)
+    if getattr(current_user, "username", None) and current_user.username not in recipient_identifiers:
+        recipient_identifiers.append(current_user.username)
+    if not recipient_identifiers:
+        raise HTTPException(status_code=403, detail="Cannot identify recipient")
+    result = await email_monitoring.decrypt_email_content_for_recipient(log_id, recipient_identifiers)
+    err = result.get("error") if isinstance(result, dict) else None
+    if err == "not_found":
+        raise HTTPException(status_code=404, detail="Email not found or invalid ID.")
+    if err == "not_recipient":
+        raise HTTPException(status_code=403, detail="You are not a recipient of this email.")
+    if err == "no_decryptable_content":
+        return {
+            "decrypted": False,
+            "message": "This email was not stored with decryptable content. Only emails encrypted after the feature was enabled support decryption. / هذا الإيميل لم يُحفظ بمحتوى قابل لفك التشفير."
+        }
+    if err == "decrypt_failed":
+        raise HTTPException(status_code=500, detail="Decryption failed.")
+    if err == "forbidden":
+        raise HTTPException(status_code=403, detail="Cannot identify recipient")
+    if isinstance(result, dict) and ("body" in result or "subject" in result):
+        return result
+    raise HTTPException(status_code=404, detail="Email not found or no content to decrypt.")
 
 
 @router.get("/user-activities/{user_id}")
@@ -316,10 +405,15 @@ async def get_user_activities(
         
         start_date = get_current_time() - timedelta(days=days)
         
-        # Get all logs for this user
+        # Get all logs for this user (match by username or email)
         user_logs = await Log.find({
-            "source_user": user.username,
-            "created_at": {"$gte": start_date}
+            "$and": [
+                {"created_at": {"$gte": start_date}},
+                {"$or": [
+                    {"source_user": user.username},
+                    {"source_user": user.email}
+                ]}
+            ]
         }).sort("-created_at").to_list()
         
         # Get all detected entities for this user (from files they analyzed)
@@ -338,7 +432,8 @@ async def get_user_activities(
                 "event_type": log.event_type,
                 "message": log.message,
                 "level": log.level,
-                "timestamp": log.created_at.isoformat(),
+                "timestamp": log.created_at.isoformat() if log.created_at else None,
+                "timestamp_server": format_datetime_server(log.created_at),
                 "source_ip": log.source_ip,
                 "user_agent": log.user_agent,
                 "metadata": log.extra_data or {}
@@ -373,6 +468,35 @@ async def get_user_activities(
             if log.network_destination
         ]))
         
+        # Collect all policy IDs referenced in log metadata for name resolution
+        all_policy_ids = set()
+        for log in user_logs:
+            meta = log.extra_data or {}
+            ids = meta.get("matching_policy_ids") or []
+            for pid in ids:
+                try:
+                    all_policy_ids.add(pid)
+                except Exception:
+                    pass
+        policy_id_to_name = {}
+        if all_policy_ids:
+            from bson import ObjectId
+            oids = []
+            for pid in all_policy_ids:
+                try:
+                    oids.append(ObjectId(pid))
+                except Exception:
+                    pass
+            if oids:
+                policies = await Policy.find({"_id": {"$in": oids}}).to_list()
+                for p in policies:
+                    policy_id_to_name[str(p.id)] = p.name or str(p.id)
+        
+        def policy_names_for_log(log):
+            meta = log.extra_data or {}
+            ids = meta.get("matching_policy_ids") or []
+            return [policy_id_to_name.get(pid, pid) for pid in ids]
+        
         return {
             "user_id": str(user.id),
             "username": user.username,
@@ -396,11 +520,14 @@ async def get_user_activities(
                         "id": str(log.id),
                         "event_type": log.event_type,
                         "message": log.message,
-                        "timestamp": log.created_at.isoformat(),
+                        "timestamp": log.created_at.isoformat() if log.created_at else None,
+                        "timestamp_server": format_datetime_server(log.created_at),
                         "source_ip": log.source_ip,
+                        "source_user": log.source_user,
                         "file_name": log.file_name,
                         "network_destination": log.network_destination,
-                        "metadata": log.extra_data or {}
+                        "metadata": log.extra_data or {},
+                        "policy_names": policy_names_for_log(log)
                     }
                     for log in user_logs
                 ],

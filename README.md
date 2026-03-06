@@ -15,6 +15,7 @@ An integrated system for protecting personal data within organizations, combinin
 - 📊 **لوحة تحكم**: واجهة إدارة كاملة للسياسات والتنبيهات والمستخدمين
 - 📧 **مراقبة البريد**: محاكاة واختبار مراقبة البريد الإلكتروني
 - 📝 **سجلات**: تسجيل شامل لجميع الأحداث والأنشطة
+- 🕐 **وقت الخادم**: عرض التواريخ والأوقات بتنسيق موحد من منطقة زمنية الخادم (الأشعارات، السجلات، سجل العمليات، البريد) — إعداد TIMEZONE في .env
 - ⚖️ **الامتثال**: دعم معايير GDPR و HIPAA
 
 ## المتطلبات / Requirements
@@ -125,3 +126,9 @@ An integrated system for protecting personal data within organizations, combinin
 ## الترخيص / License
 
 هذا المشروع مفتوح المصدر / This project is open source.
+
+---
+
+## استكشاف الأخطاء / Troubleshooting
+
+- **عدم ظهور إشعارات المدير عند التثبيت على جهاز آخر:** راجع [استكشاف إشعارات المدير](docs/TROUBLESHOOTING_ALERTS.md) للتحقق من تسجيل الدخول كـ Admin، تشغيل MongoDB، ووجود سياسات مفعّلة.

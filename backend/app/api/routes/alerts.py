@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from app.schemas.alerts import AlertResponse, AlertUpdate
+from app.utils.datetime_utils import format_datetime_server
 from app.models_mongo.alerts import Alert, AlertStatus, AlertSeverity
 from app.models_mongo.policies import Policy
 from app.api.dependencies import get_current_admin
@@ -95,8 +96,11 @@ async def get_alerts(
                     action_taken=alert.action_taken,
                     blocked=alert.blocked if alert.blocked is not None else False,
                     created_at=alert.created_at,
+                    created_at_server=format_datetime_server(alert.created_at),
                     resolved_at=alert.resolved_at,
-                    resolved_by=alert.resolved_by
+                    resolved_by=alert.resolved_by,
+                    attachment_names=alert.attachment_names or [],
+                    extra_data=alert.extra_data
                 ))
             except Exception as e:
                 # Skip problematic alerts and log error
@@ -179,8 +183,11 @@ async def get_recent_alerts(
                     action_taken=alert.action_taken,
                     blocked=alert.blocked if alert.blocked is not None else False,
                     created_at=alert.created_at,
+                    created_at_server=format_datetime_server(alert.created_at),
                     resolved_at=alert.resolved_at,
-                    resolved_by=alert.resolved_by
+                    resolved_by=alert.resolved_by,
+                    attachment_names=alert.attachment_names or [],
+                    extra_data=getattr(alert, 'extra_data', None)
                 ))
             except Exception as e:
                 import logging
@@ -239,8 +246,11 @@ async def get_alert(
         action_taken=alert.action_taken,
         blocked=alert.blocked if alert.blocked is not None else False,
         created_at=alert.created_at,
+        created_at_server=format_datetime_server(alert.created_at),
         resolved_at=alert.resolved_at,
-        resolved_by=alert.resolved_by
+        resolved_by=alert.resolved_by,
+        attachment_names=alert.attachment_names or [],
+        extra_data=getattr(alert, 'extra_data', None)
     )
 
 
@@ -300,8 +310,10 @@ async def update_alert(
             action_taken=alert.action_taken,
             blocked=alert.blocked if alert.blocked is not None else False,
             created_at=alert.created_at,
+            created_at_server=format_datetime_server(alert.created_at),
             resolved_at=alert.resolved_at,
-            resolved_by=alert.resolved_by
+            resolved_by=alert.resolved_by,
+            attachment_names=alert.attachment_names or []
         )
         
     except HTTPException:

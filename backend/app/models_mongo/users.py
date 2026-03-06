@@ -13,6 +13,7 @@ class UserRole(str, Enum):
     """User role enumeration"""
     REGULAR = "regular"
     ADMIN = "admin"
+    MANAGER = "manager"  # مدير قسم - can manage users in same department only
 
 
 class UserStatus(str, Enum):
@@ -34,6 +35,9 @@ class User(Document):
     role: UserRole = Field(default=UserRole.REGULAR)
     status: UserStatus = Field(default=UserStatus.PENDING)
     is_active: bool = Field(default=False)  # False until approved
+
+    # Department (for organization structure)
+    department_id: Optional[str] = None  # ObjectId of department as string
     
     # Approval information
     approved_at: Optional[datetime] = None
@@ -56,8 +60,12 @@ class User(Document):
         return f"<User(id={self.id}, username='{self.username}', role={self.role.value}, status={self.status.value})>"
     
     def is_admin(self) -> bool:
-        """Check if user is admin"""
+        """Check if user is admin (مدير نظام)"""
         return self.role == UserRole.ADMIN
+
+    def is_manager(self) -> bool:
+        """Check if user can manage users (admin or department manager)"""
+        return self.role in (UserRole.ADMIN, UserRole.MANAGER)
     
     def can_login(self) -> bool:
         """Check if user can login (approved and active)"""
