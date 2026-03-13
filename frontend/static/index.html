@@ -4,6 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- When API runs on different host/port, set api-base so Policy Violation and API calls work. Example: -->
+    <!-- <meta name="api-base" content="http://YOUR_SERVER_IP:8000"> -->
     <title>Secure - Data Protection System</title>
     <link rel="stylesheet" href="/static/style.css?v=202603061930">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1091,11 +1093,11 @@ Employee</textarea>
             }
             
             try {
+                const headers = typeof getAuthHeaders === 'function' ? getAuthHeaders() : {};
+                headers['Content-Type'] = 'application/json';
                 const response = await fetch('/api/analyze/', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: headers,
                     body: JSON.stringify({
                         text: text,
                         apply_policies: applyPolicies
@@ -1113,18 +1115,22 @@ Employee</textarea>
                     if (typeof displayAnalysisResult === 'function') {
                         displayAnalysisResult(data);
                     } else {
-                        // Fallback display
+                        // Fallback display (escape to prevent XSS)
+                        const esc = (s) => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
+                        const pct = (e) => { const v = e.score != null ? e.score : e.confidence; return v == null ? '—' : (v <= 1 ? v * 100 : v).toFixed(1) + '%'; };
                         let html = '<h3>Results</h3>';
-                        if (data.sensitive_data_detected) {
+                        if (data.sensitive_data_detected && data.detected_entities && data.detected_entities.length) {
                             html += '<div class="alert-banner alert-danger"><span>Sensitive Data Detected!</span></div>';
                             html += '<h4>Detected Entities (' + data.detected_entities.length + ')</h4>';
                             data.detected_entities.forEach(entity => {
                                 html += '<div class="entity-item">';
-                                html += '<div class="entity-type">' + entity.entity_type + '</div>';
-                                html += '<div class="entity-value">' + entity.value + '</div>';
-                                html += '<div class="entity-score">Confidence: ' + (entity.score * 100).toFixed(1) + '%</div>';
+                                html += '<div class="entity-type">' + esc(entity.entity_type) + '</div>';
+                                html += '<div class="entity-value">' + esc(entity.value) + '</div>';
+                                html += '<div class="entity-score">Confidence: ' + pct(entity) + '%</div>';
                                 html += '</div>';
                             });
+                        } else if (data.sensitive_data_detected) {
+                            html += '<div class="alert-banner alert-danger"><span>Sensitive Data Detected!</span></div>';
                         } else {
                             html += '<div class="alert-banner alert-success"><span>No sensitive data detected</span></div>';
                         }

@@ -1,5 +1,13 @@
-// Use relative URL to avoid CORS issues
-const API_BASE = window.location.origin || 'http://localhost:8000';
+// API base URL for fetch. Uses (in order): window.API_BASE, <meta name="api-base" content="...">, or same origin.
+// When deploying on another machine: if frontend and backend are on different ports, set API_BASE so Policy Violation and API calls work.
+function getApiBase() {
+    if (typeof window === 'undefined') return 'http://localhost:8000';
+    const fromWindow = window.API_BASE;
+    const fromMeta = document.querySelector && document.querySelector('meta[name="api-base"]')?.getAttribute('content');
+    const base = (fromWindow || fromMeta || window.location?.origin || 'http://localhost:8000').trim();
+    return base.replace(/\/$/, '');
+}
+const API_BASE = getApiBase();
 
 /** Format alert created_at in user's local timezone (browser). Returns 'N/A' if invalid. */
 function formatAlertTimeLocal(createdAt, fallback) {
@@ -769,11 +777,11 @@ async function analyzeText() {
         }
         
         console.log('Sending request to API...');
+        const headers = getAuthHeaders();
+        headers['Content-Type'] = 'application/json';
         const response = await fetch('/api/analyze/', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: headers,
             body: JSON.stringify({
                 text: text,
                 apply_policies: applyPolicies
@@ -828,13 +836,25 @@ function displayAnalysisResult(result, fileName = null) {
         : document.getElementById('resultContentText');
     
     if (!resultBox || !resultContent) return;
+
+    const esc = (s) => {
+        if (s == null) return '';
+        const d = document.createElement('div');
+        d.textContent = String(s);
+        return d.innerHTML;
+    };
+    const confidencePct = (entity) => {
+        const v = entity.score != null ? entity.score : entity.confidence;
+        if (v == null) return '—';
+        return (v <= 1 ? v * 100 : v).toFixed(1) + '%';
+    };
     
     let html = '';
 
     // Show file name if provided
     if (fileName) {
         html += `<div style="margin-bottom: 16px; padding: 12px; background: var(--light); border-radius: 8px; border-left: 4px solid var(--primary);">
-            <strong>File:</strong> ${fileName}
+            <strong>File:</strong> ${esc(fileName)}
         </div>`;
     }
     
@@ -871,18 +891,20 @@ function displayAnalysisResult(result, fileName = null) {
             appliedPolicies.forEach(policy => {
                 const actionBadge = policy.action === 'block' ? 'badge-danger' : policy.action === 'alert' ? 'badge-warning' : 'badge-info';
                 const severityBadge = policy.severity === 'critical' || policy.severity === 'high' ? 'badge-danger' : policy.severity === 'medium' ? 'badge-warning' : 'badge-info';
+                const matchedStr = (policy.matched_entities || []).map(e => esc(e)).join(', ');
+                const typesStr = (policy.entity_types || []).map(t => esc(t)).join(', ');
                 html += `
                     <div style="padding: 16px; margin-bottom: 12px; background: var(--light); border-radius: 8px; border-left: 4px solid var(--primary);">
                         <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
-                            <strong style="font-size: 1.1rem; color: var(--dark);">${policy.name}</strong>
+                            <strong style="font-size: 1.1rem; color: var(--dark);">${esc(policy.name)}</strong>
                             <div>
-                                <span class="badge ${actionBadge}" style="margin-right: 8px;">${policy.action}</span>
-                                <span class="badge ${severityBadge}">${policy.severity}</span>
+                                <span class="badge ${actionBadge}" style="margin-right: 8px;">${esc(policy.action)}</span>
+                                <span class="badge ${severityBadge}">${esc(policy.severity)}</span>
                             </div>
                         </div>
                         <div style="margin-top: 8px; font-size: 0.9rem; color: var(--text-muted);">
-                            <div><strong>Matched Entities:</strong> ${policy.matched_entities.join(', ')} (${policy.matched_count} found)</div>
-                            <div style="margin-top: 4px;"><strong>Policy Entity Types:</strong> ${policy.entity_types.join(', ')}</div>
+                            <div><strong>Matched Entities:</strong> ${matchedStr} (${policy.matched_count} found)</div>
+                            <div style="margin-top: 4px;"><strong>Policy Entity Types:</strong> ${typesStr}</div>
                         </div>
                     </div>
                 `;
@@ -904,12 +926,12 @@ function displayAnalysisResult(result, fileName = null) {
         }
         
         html += `<h4 style="margin-top: 24px; margin-bottom: 16px; color: var(--dark);">Detected Entities (${result.detected_entities.length})</h4>`;
-        result.detected_entities.forEach(entity => {
+        (result.detected_entities || []).forEach(entity => {
             html += `
                 <div class="entity-item">
-                    <div class="entity-type">${entity.entity_type}</div>
-                    <div class="entity-value">${entity.value}</div>
-                    <div class="entity-score">Confidence: ${(entity.score * 100).toFixed(1)}%</div>
+                    <div class="entity-type">${esc(entity.entity_type || '')}</div>
+                    <div class="entity-value">${esc(entity.value || '')}</div>
+                    <div class="entity-score">Confidence: ${confidencePct(entity)}</div>
                 </div>
             `;
         });
@@ -917,7 +939,7 @@ function displayAnalysisResult(result, fileName = null) {
         if (result.actions_taken && result.actions_taken.length > 0) {
             html += `<div class="actions-taken" style="margin-top: 16px;"><strong>Actions Taken:</strong> `;
             result.actions_taken.forEach(action => {
-                html += `<span class="action-tag">${action}</span>`;
+                html += `<span class="action-tag">${esc(action)}</span>`;
             });
             html += `</div>`;
         }
@@ -2084,6 +2106,78 @@ function showPolicyDetails(policyId, policyName, policyData) {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 }
 
+/**
+ * Build HTML for a draggable card showing attachment/file names.
+ * title defaults to 'Attachments'. attachmentContents optional: [{filename, content}] for email modal.
+ */
+function buildAttachmentsCardHtml(fileNames, title, attachmentContents) {
+    if (!fileNames || !fileNames.length) return '';
+    const cardTitle = title != null ? title : 'Attachments';
+    const esc = (s) => {
+        const d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    };
+    const contentByFile = Array.isArray(attachmentContents)
+        ? Object.fromEntries(attachmentContents.map(a => [a.filename, a.content]))
+        : {};
+    const listHtml = fileNames.map(name => {
+        const content = contentByFile[name];
+        const contentBlock = content != null && String(content).trim()
+            ? `<pre class="attachment-card-content">${esc(content)}</pre>`
+            : '';
+        return `<div class="attachment-card-item"><span class="attachment-card-filename">${esc(name)}</span>${contentBlock}</div>`;
+    }).join('');
+    return `<div class="attachment-card-draggable" data-draggable-card>
+        <div class="attachment-card-header" data-drag-handle><span class="attachment-card-title">${esc(cardTitle)}</span><span class="attachment-card-drag-hint" aria-hidden="true">&#8942;&#8942;</span></div>
+        <div class="attachment-card-body">${listHtml}</div>
+    </div>`;
+}
+
+/** Initialize drag-to-move for attachment cards inside the given container */
+function initDraggableCards(container) {
+    if (!container) return;
+    const cards = container.querySelectorAll('.attachment-card-draggable[data-draggable-card]');
+    cards.forEach(card => {
+        const header = card.querySelector('[data-drag-handle]');
+        if (!header) return;
+        let dragging = false, startX, startY, startLeft, startTop;
+        const onMouseDown = (e) => {
+            if (e.button !== 0) return;
+            dragging = true;
+            const rect = card.getBoundingClientRect();
+            startLeft = rect.left;
+            startTop = rect.top;
+            startX = e.clientX;
+            startY = e.clientY;
+            card.classList.add('is-dragging');
+            card.style.position = 'fixed';
+            card.style.left = startLeft + 'px';
+            card.style.top = startTop + 'px';
+            card.style.width = rect.width + 'px';
+            e.preventDefault();
+        };
+        const onMouseMove = (e) => {
+            if (!dragging) return;
+            const dx = e.clientX - startX, dy = e.clientY - startY;
+            card.style.left = (startLeft + dx) + 'px';
+            card.style.top = (startTop + dy) + 'px';
+        };
+        const onMouseUp = () => {
+            if (!dragging) return;
+            dragging = false;
+            card.classList.remove('is-dragging');
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        };
+        header.addEventListener('mousedown', (e) => {
+            onMouseDown(e);
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+    });
+}
+
 function showAlertDetails(alertId, alertData) {
     // Parse the alert data if it's a string
     let alert;
@@ -2096,7 +2190,11 @@ function showAlertDetails(alertId, alertData) {
     } else {
         alert = alertData;
     }
-    
+    const escapeHtml = (s) => {
+        const d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    };
     const description = alert.description || 'No description available';
     const sourceInfo = alert.source_user 
         ? `${alert.source_user}${alert.source_ip ? ' @ ' + alert.source_ip : ''}${alert.source_device ? ' (' + alert.source_device + ')' : ''}`
@@ -2191,10 +2289,8 @@ function showAlertDetails(alertId, alertData) {
                         <h4>Source</h4>
                         <p class="detail-value">${sourceInfo}</p>
                     </div>
-                    ${(alert.attachment_names && alert.attachment_names.length) ? `<div class="detail-section">
-                        <h4>Attachments</h4>
-                        <p class="detail-value">${alert.attachment_names.map(n => escapeHtml(n)).join(', ')}</p>
-                    </div>` : ''}
+                    ${(alert.attachment_names && alert.attachment_names.length) ? buildAttachmentsCardHtml(alert.attachment_names, 'Attachments', (alert.extra_data && alert.extra_data.attachment_contents) || []) : ''}
+                    ${(alert.extra_data && (alert.extra_data.body_preview || alert.extra_data.body)) ? `<div class="detail-section"><h4>Body</h4><pre class="attachment-card-content" style="margin:0;">${escapeHtml(alert.extra_data.body_preview || alert.extra_data.body)}</pre></div>` : ''}
                     <div class="detail-section">
                         <h4>Detected Entities</h4>
                         <div class="entities-container ${!hasEntities ? 'entities-empty' : ''}">${entitiesHtml}</div>
@@ -2218,6 +2314,8 @@ function showAlertDetails(alertId, alertData) {
     }
     
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+    const modalEl = document.getElementById('alertDetailsModal');
+    if (modalEl && typeof initDraggableCards === 'function') initDraggableCards(modalEl);
 }
 
 function closeDetailsModal(event) {
@@ -2669,10 +2767,89 @@ function displayMonitoringUsers(users) {
     container.innerHTML = html;
 }
 
+const USER_ACTIVITY_PAGE_SIZE = 20;
+
+function buildUserActivityTableRows(operations, escapeHtml) {
+    if (!operations.length) {
+        return '<tr><td colspan="7" class="text-muted">No operations found for this period.</td></tr>';
+    }
+    return operations.map((op, idx) => {
+        const metadata = op.metadata ? JSON.stringify(op.metadata, null, 2) : '';
+        const time = op.timestamp_server || (op.timestamp ? new Date(op.timestamp).toLocaleString() : 'N/A');
+        const fileDisplay = op.file_name || (op.metadata && op.metadata.attachment_names && op.metadata.attachment_names.length ? op.metadata.attachment_names.join(', ') : 'N/A');
+        const toRecipients = (op.metadata && op.metadata.to) ? (Array.isArray(op.metadata.to) ? op.metadata.to.join(', ') : String(op.metadata.to)) : '—';
+        return `
+            <tr class="table-row-clickable" data-op-index="${idx}" title="Click to view operation details">
+                <td>${escapeHtml(op.event_type || 'N/A')}</td>
+                <td>${escapeHtml(op.message || 'N/A')}</td>
+                <td>${escapeHtml(time)}</td>
+                <td>${escapeHtml(op.source_ip || 'N/A')}</td>
+                <td><span class="text-muted">${escapeHtml(toRecipients)}</span></td>
+                <td>${escapeHtml(fileDisplay)}</td>
+                <td><pre class="activity-metadata">${escapeHtml(metadata || '—')}</pre></td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function buildUserActivityPagination(pagination, userId) {
+    if (!pagination || pagination.total_pages <= 1) return '';
+    const { page, total_pages, total } = pagination;
+    let html = '<div class="pagination" style="margin-top:12px;flex-wrap:wrap;gap:6px;">';
+    if (pagination.has_prev) {
+        html += `<button type="button" class="btn btn-secondary btn-small" onclick="loadUserActivityPage('${userId}', ${page - 1})">Prev</button> `;
+    }
+    html += `<span class="text-muted" style="align-self:center;">Page ${page} of ${total_pages} (${total} total)</span>`;
+    if (pagination.has_next) {
+        html += ` <button type="button" class="btn btn-secondary btn-small" onclick="loadUserActivityPage('${userId}', ${page + 1})">Next</button>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+async function loadUserActivityPage(userId, page) {
+    const modal = document.getElementById('userActivityModal');
+    if (!modal) return;
+    const tbody = modal.querySelector('.logs-table tbody');
+    const paginationContainer = modal.querySelector('#userActivityPagination') || modal.querySelector('.user-activity-pagination');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-muted">Loading…</td></tr>';
+    try {
+        const limit = USER_ACTIVITY_PAGE_SIZE;
+        const response = await fetch(`/api/monitoring/user-activities/${encodeURIComponent(userId)}?days=30&page=${page}&limit=${limit}`, {
+            headers: getAuthHeaders()
+        });
+        if (!response.ok) throw new Error('Failed to load page');
+        const data = await response.json();
+        const operations = (data.operations && Array.isArray(data.operations.all)) ? data.operations.all : [];
+        const escapeHtml = (value) => {
+            const div = document.createElement('div');
+            div.textContent = value == null ? '' : String(value);
+            return div.innerHTML;
+        };
+        window._lastUserActivityOperations = operations;
+        if (tbody) tbody.innerHTML = buildUserActivityTableRows(operations, escapeHtml);
+        if (data.pagination && paginationContainer) {
+            paginationContainer.innerHTML = buildUserActivityPagination(data.pagination, userId);
+        }
+        modal.querySelectorAll('tr.table-row-clickable').forEach(tr => {
+            tr.onclick = function () {
+                const idx = parseInt(this.getAttribute('data-op-index'), 10);
+                if (!isNaN(idx) && window._lastUserActivityOperations && window._lastUserActivityOperations[idx]) {
+                    showOperationDetailsModal(window._lastUserActivityOperations[idx], window._lastUserActivityUser);
+                }
+            };
+        });
+    } catch (e) {
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-danger">Error loading page.</td></tr>';
+        showNotification('Error loading user activity page', 'error');
+    }
+}
+
 async function showUserActivityModal(userId) {
     if (!userId) return;
     try {
-        const response = await fetch(`/api/monitoring/user-activities/${encodeURIComponent(userId)}?days=30`, {
+        const limit = USER_ACTIVITY_PAGE_SIZE;
+        const response = await fetch(`/api/monitoring/user-activities/${encodeURIComponent(userId)}?days=30&page=1&limit=${limit}`, {
             headers: getAuthHeaders()
         });
         if (!response.ok) {
@@ -2681,6 +2858,7 @@ async function showUserActivityModal(userId) {
         const data = await response.json();
         const operations = (data.operations && Array.isArray(data.operations.all)) ? data.operations.all : [];
         const summary = data.summary || {};
+        const pagination = data.pagination || {};
 
         const escapeHtml = (value) => {
             const div = document.createElement('div');
@@ -2688,31 +2866,14 @@ async function showUserActivityModal(userId) {
             return div.innerHTML;
         };
 
-        const operationsRows = operations.length
-            ? operations.map((op, idx) => {
-                const metadata = op.metadata ? JSON.stringify(op.metadata, null, 2) : '';
-                const time = op.timestamp_server || (op.timestamp ? new Date(op.timestamp).toLocaleString() : 'N/A');
-                const fileDisplay = op.file_name || (op.metadata && op.metadata.attachment_names && op.metadata.attachment_names.length ? op.metadata.attachment_names.join(', ') : 'N/A');
-                const toRecipients = (op.metadata && op.metadata.to) ? (Array.isArray(op.metadata.to) ? op.metadata.to.join(', ') : String(op.metadata.to)) : '—';
-                return `
-                    <tr class="table-row-clickable" data-op-index="${idx}" title="Click to view operation details">
-                        <td>${escapeHtml(op.event_type || 'N/A')}</td>
-                        <td>${escapeHtml(op.message || 'N/A')}</td>
-                        <td>${escapeHtml(time)}</td>
-                        <td>${escapeHtml(op.source_ip || 'N/A')}</td>
-                        <td><span class="text-muted">${escapeHtml(toRecipients)}</span></td>
-                        <td>${escapeHtml(fileDisplay)}</td>
-                        <td><pre class="activity-metadata">${escapeHtml(metadata || '—')}</pre></td>
-                    </tr>
-                `;
-            }).join('')
-            : '<tr><td colspan="7" class="text-muted">No operations found for this period.</td></tr>';
-
+        const operationsRows = buildUserActivityTableRows(operations, escapeHtml);
         window._lastUserActivityOperations = operations;
         window._lastUserActivityUser = { username: data.username || '', email: data.email || '' };
 
+        const paginationHtml = buildUserActivityPagination(pagination, userId);
+
         const modalHtml = `
-            <div class="modal-overlay show" id="userActivityModal" onclick="closeDetailsModal(event)">
+            <div class="modal-overlay show" id="userActivityModal" data-user-id="${escapeHtml(userId)}" onclick="closeDetailsModal(event)">
                 <div class="modal-content" style="max-width: 1100px;" onclick="event.stopPropagation()">
                     <div class="modal-header">
                         <h3>User Activity Log</h3>
@@ -2722,8 +2883,8 @@ async function showUserActivityModal(userId) {
                         <div class="stats-grid" style="margin-bottom: 16px;">
                             <div class="stat-card"><p>User</p><h3>${escapeHtml(data.username || 'N/A')}</h3></div>
                             <div class="stat-card"><p>Email</p><h3>${escapeHtml(data.email || 'N/A')}</h3></div>
-                            <div class="stat-card"><p>Total Operations</p><h3>${summary.total_operations || 0}</h3></div>
-                            <div class="stat-card"><p>Analysis Operations</p><h3>${summary.analysis_operations || 0}</h3></div>
+                            <div class="stat-card"><p>Total Operations</p><h3>${summary.total_operations ?? 0}</h3></div>
+                            <div class="stat-card"><p>Analysis Operations</p><h3>${summary.analysis_operations ?? 0}</h3></div>
                         </div>
                         <p class="text-muted" style="margin-bottom: 8px; font-size: 0.9rem;">Click a row to view operation details, policy violated, and related data.</p>
                         <div class="table-container">
@@ -2742,6 +2903,7 @@ async function showUserActivityModal(userId) {
                                 <tbody>${operationsRows}</tbody>
                             </table>
                         </div>
+                        <div class="user-activity-pagination" id="userActivityPagination">${paginationHtml}</div>
                     </div>
                     <div class="modal-actions" style="padding: 16px 20px; border-top: 1px solid #e5e7eb;">
                         <button class="btn btn-secondary" onclick="closeDetailsModal()">Close</button>
@@ -2805,11 +2967,12 @@ function showOperationDetailsModal(operation, userInfo) {
           </div>`
         : (meta.policies_applied === 0 ? '<div class="detail-section"><h4>Policy</h4><p class="text-muted">No matching policy (entities detected but no policy matched)</p></div>' : '');
     const fileSection = operation.file_name
-        ? `<div class="detail-section"><h4>File</h4><p class="detail-value">${escapeHtml(operation.file_name)}${operation.file_size ? ' (' + operation.file_size + ' bytes)' : ''}</p></div>`
+        ? buildAttachmentsCardHtml([operation.file_name + (operation.file_size ? ' (' + operation.file_size + ' bytes)' : '')], 'File')
         : '';
     const attachmentNames = meta.attachment_names || [];
+    const attachmentContents = meta.attachment_contents || [];
     const attachmentSection = attachmentNames.length
-        ? `<div class="detail-section"><h4>Attachments</h4><p class="detail-value">${attachmentNames.map(n => escapeHtml(n)).join(', ')}</p></div>`
+        ? buildAttachmentsCardHtml(attachmentNames, 'Attachments', attachmentContents)
         : '';
     const networkSection = operation.network_destination
         ? `<div class="detail-section"><h4>Network</h4><p class="detail-value">${escapeHtml(operation.network_destination)}${operation.network_protocol ? ' (' + operation.network_protocol + ')' : ''}</p></div>`
@@ -2869,6 +3032,8 @@ function showOperationDetailsModal(operation, userInfo) {
     const existingModal = document.getElementById('operationDetailsModal');
     if (existingModal) existingModal.remove();
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+    const opModal = document.getElementById('operationDetailsModal');
+    if (opModal && typeof initDraggableCards === 'function') initDraggableCards(opModal);
 }
 
 // Pagination rendering function
@@ -3123,8 +3288,9 @@ function showEmailDetailModal(log) {
     const subject = ed.subject || '—';
     const date = log.created_at_server || (log.created_at ? new Date(log.created_at).toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
     const attachmentNames = ed.attachment_names || [];
+    const attachmentContents = ed.attachment_contents || [];
     const attachmentsHtml = attachmentNames.length
-        ? '<p class="detail-value">' + attachmentNames.map(n => escapeHtml(n)).join(', ') + '</p>'
+        ? buildAttachmentsCardHtml(attachmentNames, 'Attachments', attachmentContents)
         : '<p class="text-muted">None</p>';
     const bodyPreview = ed.encrypted_body != null ? ed.encrypted_body : ed.body_preview;
     const bodyLabel = ed.encrypted_body != null ? 'Body (encrypted)' : 'Body';
@@ -3157,6 +3323,8 @@ function showEmailDetailModal(log) {
     const existing = document.getElementById('emailDetailModal');
     if (existing) existing.remove();
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+    const emailModal = document.getElementById('emailDetailModal');
+    if (emailModal && typeof initDraggableCards === 'function') initDraggableCards(emailModal);
 }
 
 async function decryptEmailContent(buttonElement) {
@@ -3303,17 +3471,19 @@ resultHtml += `<p class="text-muted" style="margin-top:4px;">${emailData.attachm
                 appliedPolicies.forEach(policy => {
                     const actionBadge = policy.action === 'block' ? 'badge-danger' : policy.action === 'encrypt' ? 'badge-success' : policy.action === 'alert' ? 'badge-warning' : 'badge-info';
                     const severityBadge = policy.severity === 'critical' || policy.severity === 'high' ? 'badge-danger' : policy.severity === 'medium' ? 'badge-warning' : 'badge-info';
+                    const escE = (s) => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
+                    const matchedStrE = (policy.matched_entities || []).map(e => escE(e)).join(', ');
                     resultHtml += `
                         <div style="padding: 12px; margin-bottom: 8px; background: var(--light); border-radius: 8px; border-left: 4px solid var(--primary);">
                             <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px;">
-                                <strong>${policy.name}</strong>
+                                <strong>${escE(policy.name)}</strong>
                                 <div>
-                                    <span class="badge ${actionBadge}" style="margin-right: 8px;">${policy.action}</span>
-                                    <span class="badge ${severityBadge}">${policy.severity}</span>
+                                    <span class="badge ${actionBadge}" style="margin-right: 8px;">${escE(policy.action)}</span>
+                                    <span class="badge ${severityBadge}">${escE(policy.severity)}</span>
                                 </div>
                             </div>
                             <div style="font-size: 0.9rem; color: var(--text-muted); margin-top: 4px;">
-                                Matched: ${policy.matched_entities.join(', ')} (${policy.matched_count} found)
+                                Matched: ${matchedStrE} (${policy.matched_count} found)
                             </div>
                         </div>
                     `;
@@ -3341,22 +3511,25 @@ resultHtml += `<p class="text-muted" style="margin-top:4px;">${emailData.attachm
             }
             
             if (actionsTaken.length > 0) {
+                const escA = (s) => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
                 resultHtml += `<div style="margin-bottom: 16px;"><strong>Actions Taken:</strong> `;
                 actionsTaken.forEach(action => {
-                    resultHtml += `<span class="badge badge-info" style="margin-right: 4px;">${action}</span>`;
+                    resultHtml += `<span class="badge badge-info" style="margin-right: 4px;">${escA(action)}</span>`;
                 });
                 resultHtml += `</div>`;
             }
             
             if (analysis.detected_entities && analysis.detected_entities.length > 0) {
+                const escE = (s) => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
+                const confPct = (e) => { const v = e.score != null ? e.score : e.confidence; return v == null ? '—' : (v <= 1 ? v * 100 : v).toFixed(1) + '%'; };
                 resultHtml += `<h5>Detected Entities (${analysis.detected_entities.length}):</h5>`;
                 resultHtml += '<div class="entities-list">';
                 analysis.detected_entities.forEach(entity => {
                     resultHtml += `
                         <div class="entity-item">
-                            <span class="entity-type">${entity.entity_type}</span>
-                            <span class="entity-value">${entity.value}</span>
-                            <span class="entity-score">${(entity.score * 100).toFixed(1)}% confidence</span>
+                            <span class="entity-type">${escE(entity.entity_type)}</span>
+                            <span class="entity-value">${escE(entity.value)}</span>
+                            <span class="entity-score">${confPct(entity)} confidence</span>
                         </div>
                     `;
                 });
@@ -4121,12 +4294,16 @@ let shownAlertIds = new Set();
 let recentAlertsFetchInFlight = false;
 
 function startAdminNotificationPolling() {
-    if (!currentUser || String(currentUser.role).toLowerCase() !== 'admin' || !authToken) return;
+    if (!currentUser || String(currentUser.role).toLowerCase() !== 'admin' || !authToken) {
+        if (currentUser && String(currentUser.role).toLowerCase() !== 'admin') return;
+        return;
+    }
     stopAdminNotificationPolling();
     lastNotificationCheck = new Date().toISOString();
     shownAlertIds.clear();
+    const base = getApiBase();
+    console.log('[Policy Violation] Admin notification polling started; API base:', base);
     notificationPollingIntervalId = setInterval(fetchRecentAlertsAndShowDialogs, NOTIFICATION_POLL_INTERVAL_MS);
-    // Run first poll immediately so we don't wait for the interval
     fetchRecentAlertsAndShowDialogs();
 }
 
@@ -4142,9 +4319,9 @@ async function fetchRecentAlertsAndShowDialogs() {
     if (!currentUser || !isAdmin || !authToken || !lastNotificationCheck || recentAlertsFetchInFlight) return;
     recentAlertsFetchInFlight = true;
     const sinceAtStart = lastNotificationCheck;
+    const url = `${getApiBase()}/api/alerts/recent?since=${encodeURIComponent(sinceAtStart)}&limit=50`;
     try {
-        const since = encodeURIComponent(sinceAtStart);
-        const response = await fetch(`/api/alerts/recent?since=${since}&limit=50`, {
+        const response = await fetch(url, {
             headers: getAuthHeaders()
         });
         if (!response.ok) {
@@ -4156,6 +4333,8 @@ async function fetchRecentAlertsAndShowDialogs() {
                 safeStorage.removeItem('currentUser');
                 updateAuthUI();
                 showNotification('Session expired or invalid. Please log in again.', 'warning');
+            } else {
+                console.warn('[Policy Violation] Fetch alerts failed:', response.status, response.statusText, url);
             }
             return;
         }
@@ -4171,9 +4350,12 @@ async function fetchRecentAlertsAndShowDialogs() {
             showAlertDialog(alert);
         });
         lastNotificationCheck = new Date().toISOString();
-        if (newAlerts.length > 0 && typeof loadAlerts === 'function') loadAlerts(1);
+        if (newAlerts.length > 0) {
+            if (typeof loadAlerts === 'function') loadAlerts(1);
+            if (typeof loadMonitoringData === 'function') loadMonitoringData(1);
+        }
     } catch (e) {
-        console.warn('Failed to fetch recent alerts:', e);
+        console.warn('[Policy Violation] Failed to fetch recent alerts:', e.message || e, 'URL:', url);
     } finally {
         recentAlertsFetchInFlight = false;
     }
@@ -4247,7 +4429,8 @@ function showAlertDialog(alert) {
                     <h4>Source</h4>
                     <p class="detail-value">${escapeHtml(clientName)}</p>
                 </div>
-                ${(alert.attachment_names && alert.attachment_names.length) ? `<div class="detail-section"><h4>Attachments</h4><p class="detail-value">${alert.attachment_names.map(n => escapeHtml(n)).join(', ')}</p></div>` : ''}
+                ${(alert.attachment_names && alert.attachment_names.length) ? buildAttachmentsCardHtml(alert.attachment_names, 'Attachments', (alert.extra_data && alert.extra_data.attachment_contents) || []) : ''}
+                ${(alert.extra_data && (alert.extra_data.body_preview || alert.extra_data.body)) ? `<div class="detail-section"><h4>Body</h4><pre class="attachment-card-content" style="margin:0;">${escapeHtml(alert.extra_data.body_preview || alert.extra_data.body)}</pre></div>` : ''}
                 ${desc ? `<div class="detail-section"><h4>Description</h4><p class="detail-value">${escapeHtml(desc)}</p></div>` : ''}
                 <div class="detail-section">
                     <h4>Detected Entities</h4>
@@ -4286,6 +4469,7 @@ function showAlertDialog(alert) {
         close();
     });
     document.body.appendChild(overlay);
+    if (typeof initDraggableCards === 'function') initDraggableCards(overlay);
 }
 
 let currentMonitoringPage = 1;
@@ -4967,6 +5151,7 @@ window.loadEmailList = loadEmailList;
 window.decryptEmailContent = decryptEmailContent;
 window.searchMonitoringUsers = searchMonitoringUsers;
 window.showUserActivityModal = showUserActivityModal;
+window.loadUserActivityPage = loadUserActivityPage;
 window.showOperationDetailsModal = showOperationDetailsModal;
 window.showCreatePolicyForm = showCreatePolicyForm;
 window.closeModal = closeModal;

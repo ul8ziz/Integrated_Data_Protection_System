@@ -25,12 +25,21 @@ class FileScannerMiddleware(BaseHTTPMiddleware):
     # Maximum file size to scan (10MB)
     MAX_SCAN_SIZE = 10 * 1024 * 1024
     
+    # Paths where we allow uploads even if malicious patterns are found:
+    # analysis/file and monitoring/email exist to *detect* and report such content, not to execute it.
+    ALLOW_AND_REPORT_PATHS = ("/api/analyze/file", "/api/monitoring/email")
+
     async def dispatch(self, request: Request, call_next):
+        path = str(request.url.path)
         # Only scan file upload endpoints
         if request.method == "POST" and (
-            "/api/analyze/file" in str(request.url.path) or
-            "/api/monitoring/email" in str(request.url.path)
+            "/api/analyze/file" in path or "/api/monitoring/email" in path
         ):
+            # For analysis/email endpoints, do not block on malicious patterns:
+            # let the request through so the analysis runs and shows results (e.g. MALICIOUS_SCRIPT).
+            if any(p in path for p in self.ALLOW_AND_REPORT_PATHS):
+                response = await call_next(request)
+                return response
             try:
                 # Check if request has files
                 content_type = request.headers.get("content-type", "")
@@ -53,8 +62,6 @@ class FileScannerMiddleware(BaseHTTPMiddleware):
                 
             except Exception as e:
                 logger.error(f"Error in file scanner middleware: {e}")
-                # Allow request to proceed if scanning fails (fail open for availability)
-                # In production, you might want to fail closed
         
         response = await call_next(request)
         return response

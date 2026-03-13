@@ -69,8 +69,10 @@ class EmailMonitoringService:
                 elif isinstance(att, str):
                     attachment_names.append(att)
             
-            # Extract and analyze attachment content if present
+            # Extract and analyze attachment content if present; keep per-file content for log display
             attachment_texts = []
+            attachment_contents: List[dict] = []  # [{"filename": "...", "content": "..."}]
+            _max_content_len = 5000  # cap per-file content stored in log
             for att in attachments:
                 if isinstance(att, dict) and att.get("content") and att.get("filename"):
                     try:
@@ -89,6 +91,10 @@ class EmailMonitoringService:
                             text = self.file_extractor.extract_text(tmp_path, file_content=raw)
                             if text and text.strip():
                                 attachment_texts.append(f"[Attachment: {filename}]\n{text.strip()}")
+                                content = text.strip()
+                                if len(content) > _max_content_len:
+                                    content = content[:_max_content_len] + "\n[... truncated ...]"
+                                attachment_contents.append({"filename": filename, "content": content})
                         finally:
                             try:
                                 os.unlink(tmp_path)
@@ -113,7 +119,9 @@ class EmailMonitoringService:
                 "attachment_count": len(attachments),
                 "attachment_names": attachment_names,
             }
-            
+            if attachment_contents:
+                log_extra_data["attachment_contents"] = attachment_contents
+
             if not detected_entities:
                 log_extra_data["body_preview"] = log_body_preview
                 await self._log_email_event(
@@ -131,14 +139,18 @@ class EmailMonitoringService:
                     "message": "No sensitive data detected"
                 }
             
-            # Apply policies with detected entities
+            # Apply policies with detected entities (mark alerts as from email for Blocked Emails stats)
+            alert_extra = {"source": "email", "to": to_emails, "body_preview": log_body_preview}
+            if attachment_contents:
+                alert_extra["attachment_contents"] = attachment_contents
             policy_result = await self.policy_service.apply_policy_with_entities(
                 detected_entities=detected_entities,
                 text=full_text,
                 source_ip=source_ip,
                 source_user=source_user,
                 source_device="email_client",
-                source_attachment_names=attachment_names if attachment_names else None
+                source_attachment_names=attachment_names if attachment_names else None,
+                alert_extra_data=alert_extra
             )
             
             # Determine action based on policy result
@@ -434,11 +446,14 @@ class EmailMonitoringService:
                 "created_at": {"$gte": start_date}
             }).count()
             
-            # Count blocked emails
-            blocked_alerts = await Alert.find({
+            # Count blocked emails: alerts from email flow (title "Email blocked..." or extra_data.source "email")
+            blocked_email_alerts = await Alert.find({
                 "created_at": {"$gte": start_date},
                 "blocked": True,
-                "title": {"$regex": "^Email blocked"}
+                "$or": [
+                    {"title": {"$regex": "^Email blocked"}},
+                    {"extra_data.source": "email"}
+                ]
             }).count()
             
             # Count detected entities in emails
@@ -450,9 +465,9 @@ class EmailMonitoringService:
             return {
                 "period_days": days,
                 "total_emails_analyzed": email_logs,
-                "blocked_emails": blocked_alerts,
+                "blocked_emails": blocked_email_alerts,
                 "detected_entities": email_entities,
-                "allowed_emails": email_logs - blocked_alerts
+                "allowed_emails": email_logs - blocked_email_alerts
             }
             
         except Exception as e:

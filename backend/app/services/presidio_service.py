@@ -165,7 +165,17 @@ class PresidioService:
     def _analyze_with_regex(self, text: str) -> List[Dict[str, Any]]:
         """Fallback regex-based analysis"""
         detected_entities = []
-        
+
+        def _is_ssn_format(s: str) -> bool:
+            """True if value looks like US SSN (XXX-XX-XXXX) so we don't tag as phone."""
+            c = re.sub(r'[-.\s]', '', s)
+            return len(c) == 9 and c.isdigit()
+
+        def _is_long_digit_only(s: str) -> bool:
+            """True if value is long digit string (e.g. VAT/tax ID), not a phone."""
+            c = re.sub(r'[-.\s]', '', s)
+            return len(c) >= 14 and c.isdigit()
+
         # Phone number patterns (supports various formats)
         # Pattern 1: "Phone:" or "الهاتف:" followed by phone
         phone_labeled_pattern = r'(?:Phone|الهاتف|رقم الهاتف)\s*:?\s*([^\n]{7,20})'
@@ -177,6 +187,8 @@ class PresidioService:
             phone_match = re.search(r'[\d\s\-+()]{7,20}', phone_value)
             if phone_match:
                 phone_value = phone_match.group().strip()
+                if _is_ssn_format(phone_value) or _is_long_digit_only(phone_value):
+                    continue
                 detected_entities.append({
                     "entity_type": "PHONE_NUMBER",
                     "start": match.start(1) + phone_match.start(),
@@ -188,16 +200,18 @@ class PresidioService:
         # Pattern 2: Standalone phone numbers
         phone_pattern = r'\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{2,4}[-.\s]?\d{2,4}[-.\s]?\d{2,7}\b'
         for match in re.finditer(phone_pattern, text):
-            # Skip if it's part of credit card or IBAN
             value = match.group()
-            if not re.match(r'^\d{4}[-.\s]?\d{4}[-.\s]?\d{4}[-.\s]?\d{4}$', value):  # Not credit card
-                detected_entities.append({
-                    "entity_type": "PHONE_NUMBER",
-                    "start": match.start(),
-                    "end": match.end(),
-                    "score": 0.8,
-                    "value": value
-                })
+            if re.match(r'^\d{4}[-.\s]?\d{4}[-.\s]?\d{4}[-.\s]?\d{4}$', value):
+                continue  # Credit card
+            if _is_ssn_format(value) or _is_long_digit_only(value):
+                continue  # SSN or VAT/tax ID, not phone
+            detected_entities.append({
+                "entity_type": "PHONE_NUMBER",
+                "start": match.start(),
+                "end": match.end(),
+                "score": 0.8,
+                "value": value
+            })
         
         # Email pattern
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
@@ -275,14 +289,15 @@ class PresidioService:
                 })
         
         # IBAN Code pattern (2 letters + 2 digits + up to 30 alphanumeric)
+        # Saudi (SA) IBAN is exactly 24 chars; other lengths with SA are likely Tax Number
         # Pattern 1: "IBAN:" or "الآيبان:" followed by IBAN
         iban_labeled_pattern = r'(?:IBAN|الآيبان|رقم الآيبان)\s*:?\s*([A-Z0-9\s]{15,35})'
         for match in re.finditer(iban_labeled_pattern, text, re.IGNORECASE):
             iban_value = match.group(1).strip()
-            # Remove trailing parentheses and spaces
             iban_value = re.sub(r'\s*\([^)]*\).*$', '', iban_value).strip().replace(' ', '')
-            # Basic IBAN validation (length should be between 15-34)
             if 15 <= len(iban_value) <= 34 and re.match(r'^[A-Z]{2}\d{2}[A-Z0-9]+$', iban_value):
+                if iban_value.startswith('SA') and len(iban_value) != 24:
+                    continue
                 detected_entities.append({
                     "entity_type": "IBAN_CODE",
                     "start": match.start(1),
@@ -291,12 +306,14 @@ class PresidioService:
                     "value": iban_value
                 })
         
-        # Pattern 2: Standalone IBAN codes
-        iban_pattern = r'\b[A-Z]{2}\d{2}[A-Z0-9]{4,30}\b'
+        # Pattern 2: Standalone IBAN codes (country-specific length: e.g. Saudi SA = 24 chars)
+        iban_pattern = r'\b([A-Z]{2}\d{2}[A-Z0-9]{4,30})\b'
         for match in re.finditer(iban_pattern, text):
-            value = match.group()
-            # Basic IBAN validation (length should be between 15-34)
+            value = match.group(1)
             if 15 <= len(value) <= 34:
+                # Saudi IBAN (SA) must be exactly 24 characters; otherwise it's likely Tax Number
+                if value.startswith('SA') and len(value) != 24:
+                    continue
                 detected_entities.append({
                     "entity_type": "IBAN_CODE",
                     "start": match.start(),
@@ -474,8 +491,15 @@ class PresidioService:
                 context_end = min(len(text), end_pos + 15)
                 context = text[context_start:context_end].lower()
                 
-                # Skip common false positives
+                # Skip common false positives (labels, not person names)
                 skip_keywords = ['email', 'phone', 'address', 'company', 'شركة', 'organization', 'منظمة']
+                person_label_false_positives = {
+                    'credit card', 'stock symbol', 'stock market', 'tax number', 'vat id',
+                    'isin', 'revenue', 'profit', 'organization', 'address', 'location',
+                    'date', 'ip address', 'phone number', 'email address'
+                }
+                if value.lower().strip() in person_label_false_positives:
+                    continue
                 # But allow if it's labeled as "Name:"
                 if 'labeled' in pattern_type or not any(keyword in context for keyword in skip_keywords):
                     # Skip if it's part of an email address
@@ -519,12 +543,14 @@ class PresidioService:
                 "value": match.group()
             })
         
-        # Tax patterns (الضرائب)
-        # Pattern 1: "Tax:" or "الضريبة:" or "VAT ID:" followed by value
-        tax_labeled_pattern = r'(?:Tax|VAT|الضريبة|رقم الضريبة|VAT ID|Tax ID)\s*:?\s*([^\n]{5,30})'
+        # Tax patterns (الضرائب) — value must be the tax number only, not "ID: ..." or "Number: ..."
+        tax_labeled_pattern = r'(?:Tax|VAT|الضريبة|رقم الضريبة|VAT ID|Tax ID|Tax Number)\s*:?\s*([^\n]{5,35})'
         for match in re.finditer(tax_labeled_pattern, text, re.IGNORECASE):
             tax_value = match.group(1).strip()
             tax_value = re.sub(r'\s*\([^)]*\).*$', '', tax_value).strip()
+            # Strip label prefixes so value is only the number (e.g. "ID: 300..." -> "300...", "Number: SA..." -> "SA...")
+            for prefix in (r'^ID\s*:\s*', r'^Number\s*:\s*', r'^رقم\s*:\s*', r'^الرقم\s*:\s*'):
+                tax_value = re.sub(prefix, '', tax_value, flags=re.IGNORECASE).strip()
             if len(tax_value) >= 5:
                 detected_entities.append({
                     "entity_type": "TAX",
@@ -554,11 +580,15 @@ class PresidioService:
             })
         
         # Stock patterns (الأسهم)
+        # Skip words that are labels or market suffixes (SR, SA = Tadawul), not ticker symbols
+        stock_label_blocklist = {'ISIN', 'SEC', 'ETF', 'NYSE', 'NASDAQ', 'TICKER', 'SYMBOL', 'MARKET', 'SR', 'SA'}
         # Pattern 1: Stock symbols (e.g. AAPL, MSFT, 2222.SR)
         stock_symbol_pattern = r'\b([A-Z]{2,5}(?:\.[A-Z]{2})?)\b'
         stock_keywords = r'(?:Stock|Share|سهم|أسهم|رمز السهم|Ticker)'
         for match in re.finditer(stock_symbol_pattern, text):
             value = match.group(1)
+            if value.upper() in stock_label_blocklist:
+                continue
             # Check context for stock-related keywords
             ctx_start = max(0, match.start() - 40)
             ctx_end = min(len(text), match.end() + 40)
@@ -571,11 +601,11 @@ class PresidioService:
                     "score": 0.8,
                     "value": value
                 })
-        # Pattern 2: ISIN (2 letters + 10 alphanumeric)
+        # Pattern 2: ISIN (2 letters + 9 alphanumeric + 1 digit) — report as ISIN_CODE
         isin_pattern = r'\b([A-Z]{2}[A-Z0-9]{9}\d)\b'
         for match in re.finditer(isin_pattern, text):
             detected_entities.append({
-                "entity_type": "STOCK",
+                "entity_type": "ISIN_CODE",
                 "start": match.start(),
                 "end": match.end(),
                 "score": 0.85,
@@ -613,26 +643,31 @@ class PresidioService:
         Used when Presidio is available to supplement its results.
         """
         detected = []
-        # Tax patterns
-        tax_labeled_pattern = r'(?:Tax|VAT|الضريبة|رقم الضريبة|VAT ID|Tax ID)\s*:?\s*([^\n]{5,30})'
+        # Tax patterns — value = tax number only (strip "ID:", "Number:", etc.)
+        tax_labeled_pattern = r'(?:Tax|VAT|الضريبة|رقم الضريبة|VAT ID|Tax ID|Tax Number)\s*:?\s*([^\n]{5,35})'
         for match in re.finditer(tax_labeled_pattern, text, re.IGNORECASE):
             tax_value = match.group(1).strip()
             tax_value = re.sub(r'\s*\([^)]*\).*$', '', tax_value).strip()
+            for prefix in (r'^ID\s*:\s*', r'^Number\s*:\s*', r'^رقم\s*:\s*', r'^الرقم\s*:\s*'):
+                tax_value = re.sub(prefix, '', tax_value, flags=re.IGNORECASE).strip()
             if len(tax_value) >= 5:
                 detected.append({"entity_type": "TAX", "start": match.start(1), "end": match.end(1), "score": 0.85, "value": tax_value})
         for match in re.finditer(r'\b(SA\d{9})\b', text):
             detected.append({"entity_type": "TAX", "start": match.start(), "end": match.end(), "score": 0.9, "value": match.group()})
         for match in re.finditer(r'(?:Tax|الضريبة|VAT)\s*:?\s*(\d{1,3}(?:\.\d+)?\s*%)', text, re.IGNORECASE):
             detected.append({"entity_type": "TAX", "start": match.start(1), "end": match.end(1), "score": 0.8, "value": match.group(1).strip()})
-        # Stock patterns
+        # Stock patterns (skip label words and market suffixes SR, SA)
+        stock_label_blocklist = {'ISIN', 'SEC', 'ETF', 'NYSE', 'NASDAQ', 'TICKER', 'SYMBOL', 'MARKET', 'SR', 'SA'}
         stock_keywords = r'(?:Stock|Share|سهم|أسهم|رمز السهم|Ticker)'
         for match in re.finditer(r'\b([A-Z]{2,5}(?:\.[A-Z]{2})?)\b', text):
             value = match.group(1)
+            if value.upper() in stock_label_blocklist:
+                continue
             ctx = text[max(0, match.start() - 40):min(len(text), match.end() + 40)]
             if re.search(stock_keywords, ctx, re.IGNORECASE) or re.search(r'\.(SR|SA|TADAWUL)', value):
                 detected.append({"entity_type": "STOCK", "start": match.start(), "end": match.end(), "score": 0.8, "value": value})
         for match in re.finditer(r'\b([A-Z]{2}[A-Z0-9]{9}\d)\b', text):
-            detected.append({"entity_type": "STOCK", "start": match.start(), "end": match.end(), "score": 0.85, "value": match.group()})
+            detected.append({"entity_type": "ISIN_CODE", "start": match.start(), "end": match.end(), "score": 0.85, "value": match.group()})
         # Profit patterns
         profit_labeled_pattern = r'(?:Profit|Revenue|الربح|صافي الدخل|الأرباح|Net Income|Gross Profit)\s*:?\s*([^\n]{3,50})'
         for match in re.finditer(profit_labeled_pattern, text, re.IGNORECASE):
@@ -701,10 +736,16 @@ class PresidioService:
                         "value": text[result.start:result.end]
                     })
                 
-                # Add custom financial entities (TAX, STOCK, PROFIT) via regex
-                if any(e in self.supported_entities for e in ("TAX", "STOCK", "PROFIT")):
+                # Add custom financial entities (TAX, STOCK, ISIN_CODE, PROFIT) via regex
+                if any(e in self.supported_entities for e in ("TAX", "STOCK", "ISIN_CODE", "PROFIT")):
                     custom_financial = self._detect_custom_financial_entities(text)
                     detected_entities.extend(custom_financial)
+                # Prefer TAX over IBAN when same value (e.g. SA123456789012345 as Tax Number)
+                tax_values = {e.get("value", "").strip() for e in detected_entities if e.get("entity_type") == "TAX"}
+                detected_entities = [
+                    e for e in detected_entities
+                    if not (e.get("entity_type") == "IBAN_CODE" and e.get("value", "").strip() in tax_values)
+                ]
                 
                 logger.info(f"Detected {len(detected_entities)} entities in text (including {len(malicious_scripts)} scripts)")
                 return detected_entities
@@ -747,6 +788,20 @@ class PresidioService:
                 
                 if not overlap:
                     filtered_data.append(entity)
+            # Drop CREDIT_CARD when its span is fully inside an IBAN (e.g. IBAN body mistaken as card)
+            iban_spans = [(e['start'], e['end']) for e in filtered_data if e.get('entity_type') == 'IBAN_CODE']
+            filtered_data = [
+                e for e in filtered_data
+                if not (e.get('entity_type') == 'CREDIT_CARD' and any(
+                    s <= e['start'] and e['end'] <= t for s, t in iban_spans
+                ))
+            ]
+            # Drop IBAN when same value was already detected as TAX (e.g. SA123456789012345 as Tax Number)
+            tax_values = {e.get('value', '').strip() for e in filtered_data if e.get('entity_type') == 'TAX'}
+            filtered_data = [
+                e for e in filtered_data
+                if not (e.get('entity_type') == 'IBAN_CODE' and e.get('value', '').strip() in tax_values)
+            ]
             sensitive_data = filtered_data
         
         detected_entities.extend(sensitive_data)

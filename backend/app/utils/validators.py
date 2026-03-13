@@ -43,7 +43,7 @@ def validate_entity_types(entity_types: List[str]) -> bool:
         "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "CREDIT_CARD",
         "ADDRESS", "ORGANIZATION", "DATE_TIME", "LOCATION",
         "IBAN_CODE", "IP_ADDRESS", "MEDICAL_LICENSE", "US_SSN", "MALICIOUS_SCRIPT",
-        "TAX", "STOCK", "PROFIT"
+        "TAX", "STOCK", "ISIN_CODE", "PROFIT"
     ]
     return all(entity in valid_entities for entity in entity_types)
 

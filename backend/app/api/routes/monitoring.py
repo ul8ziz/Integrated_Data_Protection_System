@@ -382,17 +382,18 @@ async def decrypt_email_for_recipient(
 @router.get("/user-activities/{user_id}")
 async def get_user_activities(
     user_id: str,
-    days: int = 30,
+    days: int = Query(30, ge=1, le=365),
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
     current_user = Depends(get_current_admin)  # Admin only
 ):
     """
-    Get all activities for a specific user
+    Get activities for a specific user with pagination.
     
     Returns:
-    - All operations performed by the user
-    - Files analyzed by the user
-    - Files sent over network by the user
-    - Detailed information for each operation
+    - Paginated operations (all, file, network, analysis)
+    - Summary counts for the full period
+    - pagination: page, limit, total, total_pages, has_next, has_prev
     """
     try:
         from datetime import datetime, timedelta
@@ -404,9 +405,7 @@ async def get_user_activities(
             raise HTTPException(status_code=404, detail="User not found")
         
         start_date = get_current_time() - timedelta(days=days)
-        
-        # Get all logs for this user (match by username or email)
-        user_logs = await Log.find({
+        query = {
             "$and": [
                 {"created_at": {"$gte": start_date}},
                 {"$or": [
@@ -414,7 +413,15 @@ async def get_user_activities(
                     {"source_user": user.email}
                 ]}
             ]
-        }).sort("-created_at").to_list()
+        }
+        
+        # Total count for the period (for summary and pagination)
+        total_count = await Log.find(query).count()
+        total_pages = (total_count + limit - 1) // limit if total_count > 0 else 0
+        skip = (page - 1) * limit
+        
+        # Paginated logs
+        user_logs = await Log.find(query).sort("-created_at").skip(skip).limit(limit).to_list()
         
         # Get all detected entities for this user (from files they analyzed)
         user_entities = await DetectedEntity.find({
@@ -452,8 +459,8 @@ async def get_user_activities(
                 operation["network_protocol"] = log.network_protocol
                 network_operations.append(operation)
             
-            # Analysis operations
-            if log.event_type in ["analysis", "policy_applied", "file_analyzed"]:
+            # Analysis operations (from Analysis tab: text analysis, file analysis, policy applied)
+            if log.event_type in ["analysis", "policy_applied", "file_analyzed", "entities_detected_no_policy_match"]:
                 analysis_operations.append(operation)
         
         # Get unique file names
@@ -497,6 +504,7 @@ async def get_user_activities(
             ids = meta.get("matching_policy_ids") or []
             return [policy_id_to_name.get(pid, pid) for pid in ids]
         
+        # Summary uses total count in period; per-type counts are for current page
         return {
             "user_id": str(user.id),
             "username": user.username,
@@ -505,7 +513,7 @@ async def get_user_activities(
             "start_date": start_date.isoformat(),
             "end_date": get_current_time().isoformat(),
             "summary": {
-                "total_operations": len(user_logs),
+                "total_operations": total_count,
                 "file_operations": len(file_operations),
                 "network_operations": len(network_operations),
                 "analysis_operations": len(analysis_operations),
@@ -534,6 +542,14 @@ async def get_user_activities(
                 "file_operations": file_operations,
                 "network_operations": network_operations,
                 "analysis_operations": analysis_operations
+            },
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total_count,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
             }
         }
         
@@ -544,4 +560,3 @@ async def get_user_activities(
         import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error fetching user activities: {str(e)}")
-

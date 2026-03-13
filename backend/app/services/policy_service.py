@@ -59,7 +59,8 @@ class PolicyService:
     async def apply_policy_with_entities(self, detected_entities: List[Dict], 
                                    text: str = None, source_ip: str = None, 
                                    source_user: str = None, source_device: str = None,
-                                   source_attachment_names: Optional[List[str]] = None) -> Dict[str, Any]:
+                                   source_attachment_names: Optional[List[str]] = None,
+                                   alert_extra_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Apply policies using pre-detected entities (avoids re-analysis)
         
@@ -125,33 +126,31 @@ class PolicyService:
             # Apply policy action
             if policy.action == "block":
                 logger.info(f"Applying block action for policy {policy.id} ({policy.name})")
-                # Block with MyDLP (returns True even if MyDLP is disabled - simulation mode)
+                blocked = True
+                actions_taken.append(f"blocked_by_policy_{policy.id}")
+                # Always create alert for block policy (so Blocked Attempts count updates in Monitoring)
+                await self._create_alert(
+                    policy=policy,
+                    detected_entities=relevant_entities,
+                    source_ip=source_ip,
+                    source_user=source_user,
+                    source_device=source_device,
+                    blocked=True,
+                    attachment_names=source_attachment_names,
+                    extra_data=alert_extra_data
+                )
+                alert_created = True
+                # Attempt actual block via MyDLP (optional; alert already created)
                 block_result = self.mydlp.block_data_transfer(
                     source_ip=source_ip or "unknown",
                     destination="external",
                     detected_entities=relevant_entities,
                     reason=f"Policy violation: {policy.name}"
                 )
-                logger.info(f"block_data_transfer returned: {block_result}")
-                
                 if block_result:
-                    blocked = True
-                    actions_taken.append(f"blocked_by_policy_{policy.id}")
-                    logger.info(f"Email blocked by policy {policy.id} ({policy.name})")
-                    
-                    # Always create alert for blocked actions
-                    await self._create_alert(
-                        policy=policy,
-                        detected_entities=relevant_entities,
-                        source_ip=source_ip,
-                        source_user=source_user,
-                        source_device=source_device,
-                        blocked=True,
-                        attachment_names=source_attachment_names
-                    )
-                    alert_created = True
+                    logger.info(f"block_data_transfer succeeded for policy {policy.id} ({policy.name})")
                 else:
-                    logger.warning(f"block_data_transfer returned False for policy {policy.id}")
+                    logger.warning(f"block_data_transfer returned False for policy {policy.id} (alert still created)")
             
             elif policy.action == "encrypt":
                 # Encrypt detected entities in the text + notify manager (alert)
@@ -172,7 +171,8 @@ class PolicyService:
                         source_user=source_user,
                         source_device=source_device,
                         blocked=False,
-                        attachment_names=source_attachment_names
+                        attachment_names=source_attachment_names,
+                        extra_data=alert_extra_data
                     )
                     alert_created = True
                     actions_taken.append("alert_created")
@@ -187,7 +187,8 @@ class PolicyService:
                         source_user=source_user,
                         source_device=source_device,
                         blocked=blocked,
-                        attachment_names=source_attachment_names
+                        attachment_names=source_attachment_names,
+                        extra_data=alert_extra_data
                     )
                     alert_created = True
                     actions_taken.append("alert_created")
@@ -297,9 +298,10 @@ class PolicyService:
         }
     
     async def _create_alert(self, policy: Policy, detected_entities: List[Dict],
-                     source_ip: str = None, source_user: str = None, 
+                     source_ip: str = None, source_user: str = None,
                      source_device: str = None, blocked: bool = False,
-                     attachment_names: Optional[List[str]] = None):
+                     attachment_names: Optional[List[str]] = None,
+                     extra_data: Optional[Dict[str, Any]] = None):
         """Create an alert for policy violation"""
         try:
             # Determine severity based on policy
@@ -330,7 +332,8 @@ class PolicyService:
                 policy_id=str(policy.id),
                 action_taken=policy.action,
                 blocked=blocked,
-                attachment_names=attachment_names
+                attachment_names=attachment_names,
+                extra_data=extra_data
             )
             
             await alert.insert()
