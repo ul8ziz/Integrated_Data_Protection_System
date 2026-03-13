@@ -130,6 +130,15 @@ An integrated system for protecting personal data within organizations, combinin
 
 ---
 
+## التوثيق / Documentation
+
+- [مخطط السياق (Context Diagram)](docs/CONTEXT_DIAGRAM_SPEC.md) — مواصفات مخطط السياق للنظام وبرومبت لإنشائه
+- [مخطط علاقات الكيانات (ERD)](docs/ERD_SPEC.md) — مواصفات ERD وبرومبت لإنشائه
+- [كيان المستخدمين — العناصر والسمات](docs/USER_ENTITY_SPEC.md) — مواصفات كيان Users وبرومبت لإنشائه
+- [مخطط حالات الاستخدام (Use Case)](docs/USE_CASE_SPEC.md) — مواصفات Use Case وتدفق إنشاء الحساب
+- [المخطط التسلسلي (Sequence Diagram)](docs/SEQUENCE_DIAGRAM_SPEC.md) — مخطط تسلسلي لعمليات إنشاء الحساب
+- [مخطط النشاط (Activity Diagram)](docs/ACTIVITY_DIAGRAM_SPEC.md) — مخطط نشاط لعمليات النظام
+
 ## استكشاف الأخطاء / Troubleshooting
 
 - **عدم ظهور إشعارات المدير عند التثبيت على جهاز آخر:** راجع [استكشاف إشعارات المدير](docs/TROUBLESHOOTING_ALERTS.md) للتحقق من تسجيل الدخول كـ Admin، تشغيل MongoDB، ووجود سياسات مفعّلة.
