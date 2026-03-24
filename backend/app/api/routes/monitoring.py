@@ -1,10 +1,10 @@
 """
 API routes for monitoring and reports
 """
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, Path
 from typing import Dict, Any
 from datetime import datetime, timedelta
-from app.utils.datetime_utils import get_current_time, format_datetime_server
+from app.utils.datetime_utils import get_current_time, format_datetime_server, to_iso_utc
 from app.models_mongo.logs import Log, DetectedEntity
 from app.models_mongo.alerts import Alert
 from app.models_mongo.policies import Policy
@@ -192,7 +192,7 @@ async def get_logs_report(
                     "level": log.level,
                     "source_ip": log.source_ip,
                     "source_user": log.source_user,
-                    "created_at": log.created_at.isoformat() if log.created_at else None,
+                    "created_at": to_iso_utc(log.created_at),
                     "created_at_server": format_datetime_server(log.created_at),
                     "metadata": log.extra_data
                 }
@@ -281,7 +281,7 @@ async def get_email_logs(
                     "level": log.level,
                     "source_ip": log.source_ip,
                     "source_user": log.source_user,
-                    "created_at": log.created_at.isoformat() if log.created_at else None,
+                    "created_at": to_iso_utc(log.created_at),
                     "created_at_server": format_datetime_server(log.created_at),
                     "email_data": log.extra_data
                 }
@@ -331,7 +331,7 @@ async def get_email_list_inbox(
                     "level": log.level,
                     "source_ip": log.source_ip,
                     "source_user": log.source_user,
-                    "created_at": log.created_at.isoformat() if log.created_at else None,
+                    "created_at": to_iso_utc(log.created_at),
                     "created_at_server": format_datetime_server(log.created_at),
                     "email_data": log.extra_data
                 }
@@ -341,6 +341,35 @@ async def get_email_list_inbox(
     except Exception as e:
         logger.error(f"Error fetching email list: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching email list: {str(e)}")
+
+
+@router.get("/email/log/{log_id}/analysis")
+async def get_email_log_analysis(
+    log_id: str = Path(..., description="MongoDB log id of the email_received event"),
+    current_user=Depends(get_current_user),
+):
+    """
+    PII analysis for an inbox email log: uses stored snapshot when present,
+    otherwise re-runs Presidio on body_preview / decrypted originals + attachment text.
+    Only recipients listed on the email may access.
+    """
+    recipient_identifiers = []
+    if getattr(current_user, "email", None):
+        recipient_identifiers.append(current_user.email)
+    if getattr(current_user, "username", None) and current_user.username not in recipient_identifiers:
+        recipient_identifiers.append(current_user.username)
+    if not recipient_identifiers:
+        raise HTTPException(status_code=403, detail="Cannot identify recipient")
+
+    result = await email_monitoring.reanalyze_email_log_for_recipient(log_id, recipient_identifiers)
+    err = result.get("error") if isinstance(result, dict) else None
+    if err == "not_found":
+        raise HTTPException(status_code=404, detail="Email log not found.")
+    if err == "not_recipient":
+        raise HTTPException(status_code=403, detail="You are not a recipient of this email.")
+    if err == "forbidden":
+        raise HTTPException(status_code=403, detail="Access denied.")
+    return result
 
 
 @router.get("/email/decrypt")
@@ -439,7 +468,7 @@ async def get_user_activities(
                 "event_type": log.event_type,
                 "message": log.message,
                 "level": log.level,
-                "timestamp": log.created_at.isoformat() if log.created_at else None,
+                "timestamp": to_iso_utc(log.created_at),
                 "timestamp_server": format_datetime_server(log.created_at),
                 "source_ip": log.source_ip,
                 "user_agent": log.user_agent,
@@ -528,7 +557,7 @@ async def get_user_activities(
                         "id": str(log.id),
                         "event_type": log.event_type,
                         "message": log.message,
-                        "timestamp": log.created_at.isoformat() if log.created_at else None,
+                        "timestamp": to_iso_utc(log.created_at),
                         "timestamp_server": format_datetime_server(log.created_at),
                         "source_ip": log.source_ip,
                         "source_user": log.source_user,

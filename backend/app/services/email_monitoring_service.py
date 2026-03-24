@@ -18,6 +18,9 @@ from app.utils.datetime_utils import get_current_time
 
 logger = logging.getLogger(__name__)
 
+# Stored in inbox log for preview + on-demand re-analysis (avoid tiny 500-char clip)
+EMAIL_LOG_BODY_PREVIEW_MAX = 20000
+
 
 class EmailMonitoringService:
     """Service for monitoring and analyzing emails for sensitive data"""
@@ -28,6 +31,42 @@ class EmailMonitoringService:
         self.policy_service = PolicyService()
         self.mydlp = MyDLPService()
         self.file_extractor = FileTextExtractor()
+
+    @staticmethod
+    def _serialize_entities_for_log(entities: List[Dict], max_value_len: int = 120) -> List[Dict[str, Any]]:
+        """JSON-safe entity list for inbox / log display (truncated values)."""
+        out: List[Dict[str, Any]] = []
+        for e in entities or []:
+            v = e.get("value")
+            if v is None:
+                v = ""
+            else:
+                v = str(v)
+            if len(v) > max_value_len:
+                v = v[:max_value_len] + "…"
+            sc = e.get("score")
+            try:
+                sc = round(float(sc), 4) if sc is not None else None
+            except (TypeError, ValueError):
+                sc = None
+            out.append({
+                "entity_type": e.get("entity_type"),
+                "score": sc,
+                "value": v,
+            })
+        return out
+
+    @staticmethod
+    def _applied_policies_summary(policy_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        apps = policy_result.get("applied_policies") or []
+        return [
+            {
+                "name": p.get("name"),
+                "action": p.get("action"),
+                "severity": p.get("severity"),
+            }
+            for p in apps[:30]
+        ]
     
     async def analyze_email(self, email_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -110,7 +149,7 @@ class EmailMonitoringService:
             detected_entities = self.presidio.analyze(full_text)
             
             # We will log the email event after we know the result (so we can store encrypted body for recipient when action=encrypt)
-            log_body_preview = body[:500] if body else ""
+            log_body_preview = body[:EMAIL_LOG_BODY_PREVIEW_MAX] if body else ""
             log_extra_data = {
                 "from": from_email,
                 "to": to_emails,
@@ -124,6 +163,8 @@ class EmailMonitoringService:
 
             if not detected_entities:
                 log_extra_data["body_preview"] = log_body_preview
+                log_extra_data["sensitive_data_detected"] = False
+                log_extra_data["detected_entities"] = []
                 await self._log_email_event(
                     event_type="email_received",
                     message=f"Email from {from_email} to {', '.join(to_emails)}",
@@ -161,6 +202,10 @@ class EmailMonitoringService:
                 logger.info(f"Detected entity types: {[e['entity_type'] for e in detected_entities]}")
                 logger.info(f"Available policies: {[p.name for p in await self.policy_service.get_active_policies()]}")
                 log_extra_data["body_preview"] = log_body_preview
+                log_extra_data["sensitive_data_detected"] = True
+                log_extra_data["detected_entities"] = self._serialize_entities_for_log(detected_entities)
+                log_extra_data["policies_matched"] = False
+                log_extra_data["analysis_action"] = "allow"
                 await self._log_email_event(
                     event_type="email_received",
                     message=f"Email from {from_email} to {', '.join(to_emails)}",
@@ -246,7 +291,7 @@ class EmailMonitoringService:
             # Log email so it appears in inbox (only when email is sent: allow/alert/encrypt, not block)
             if action != "block":
                 log_extra_data["body_preview"] = (
-                    (encrypted_body[:500] if encrypted_body else log_body_preview)
+                    (encrypted_body[:EMAIL_LOG_BODY_PREVIEW_MAX] if encrypted_body else log_body_preview)
                     if action == "encrypt" and encrypted_body
                     else log_body_preview
                 )
@@ -263,6 +308,17 @@ class EmailMonitoringService:
                         log_extra_data["original_subject_encrypted"] = self.policy_service.encryption.encrypt(subject)
                     except Exception as enc_err:
                         logger.warning(f"Could not store encrypted original subject for decrypt: {enc_err}")
+                log_extra_data["sensitive_data_detected"] = True
+                log_extra_data["detected_entities"] = self._serialize_entities_for_log(detected_entities)
+                log_extra_data["policies_matched"] = policy_result.get("policies_matched", False)
+                log_extra_data["analysis_action"] = action
+                log_extra_data["applied_policies_summary"] = self._applied_policies_summary(policy_result)
+                if action == "encrypt":
+                    log_extra_data["encrypted"] = True
+                    log_extra_data["encryption_method"] = "AES-256"
+                elif action == "alert":
+                    log_extra_data["alert_triggered"] = True
+                    log_extra_data["alert_severity"] = policy_result.get("highest_severity", "medium")
                 await self._log_email_event(
                     event_type="email_received",
                     message=f"Email from {from_email} to {', '.join(to_emails)}",
@@ -401,6 +457,108 @@ class EmailMonitoringService:
             return out if out else {"error": "decrypt_failed"}
         except Exception as e:
             logger.error(f"decrypt_email_content_for_recipient error: {e}")
+            return {"error": "not_found"}
+
+    def _build_text_from_stored_email_extra(self, extra: Dict[str, Any]) -> str:
+        """Rebuild analysis text from log extra_data (decrypt originals when stored)."""
+        subject = extra.get("subject") or ""
+        subj_enc = extra.get("original_subject_encrypted")
+        if subj_enc:
+            try:
+                subject = self.policy_service.encryption.decrypt(subj_enc)
+            except Exception:
+                pass
+        body_text = ""
+        obe = extra.get("original_body_encrypted")
+        if obe:
+            try:
+                body_text = self.policy_service.encryption.decrypt(obe)
+            except Exception:
+                body_text = ""
+        if not body_text:
+            body_text = extra.get("body_preview") or ""
+        full_text = f"{subject}\n\n{body_text}" if subject else body_text
+        for ac in extra.get("attachment_contents") or []:
+            fn = ac.get("filename", "") or ""
+            content = (ac.get("content") or "").strip()
+            if content:
+                full_text += "\n\n[Attachment: %s]\n%s" % (fn, content)
+        max_len = 100000
+        if len(full_text) > max_len:
+            return full_text[:max_len] + "\n[... truncated for analysis ...]"
+        return full_text
+
+    async def reanalyze_email_log_for_recipient(
+        self, log_id: str, recipient_identifiers: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Re-run Presidio on text stored in the email log. Only the recipient may call.
+        Uses snapshot when already stored; otherwise analyzes body_preview + attachments
+        (and decrypted originals when available).
+        """
+        if not recipient_identifiers:
+            return {"error": "forbidden"}
+        try:
+            from beanie import PydanticObjectId
+            from bson.errors import InvalidId
+            try:
+                oid = PydanticObjectId(log_id)
+            except (InvalidId, TypeError, ValueError, Exception):
+                return {"error": "not_found"}
+            log = await Log.get(oid)
+            if not log or log.event_type != "email_received":
+                return {"error": "not_found"}
+            extra = log.extra_data or {}
+            to_list = extra.get("to") or []
+            if not to_list:
+                return {"error": "not_recipient"}
+            to_set = set(str(x).strip().lower() for x in to_list)
+            if not any(str(rid).strip().lower() in to_set for rid in recipient_identifiers):
+                return {"error": "not_recipient"}
+
+            snap = extra.get("detected_entities")
+            if isinstance(snap, list):
+                if len(snap) > 0:
+                    return {
+                        "sensitive_data_detected": bool(extra.get("sensitive_data_detected", True)),
+                        "detected_entities": snap,
+                        "source": "from_log_snapshot",
+                    }
+                if extra.get("sensitive_data_detected") is False:
+                    return {
+                        "sensitive_data_detected": False,
+                        "detected_entities": [],
+                        "source": "from_log_snapshot",
+                    }
+
+            full_text = self._build_text_from_stored_email_extra(extra)
+            if not full_text or not str(full_text).strip():
+                return {
+                    "sensitive_data_detected": False,
+                    "detected_entities": [],
+                    "source": "recomputed",
+                    "note": "no_stored_text",
+                }
+
+            raw_entities = self.presidio.analyze(full_text)
+            serialized = self._serialize_entities_for_log(raw_entities)
+            # Heuristic: logs before EMAIL_LOG_BODY_PREVIEW_MAX stored only 500 chars of body
+            bp = extra.get("body_preview") or ""
+            legacy_short = (not extra.get("original_body_encrypted")) and len(bp) == 500
+            out = {
+                "sensitive_data_detected": len(serialized) > 0,
+                "detected_entities": serialized,
+                "source": "recomputed_from_stored_text",
+            }
+            if legacy_short:
+                out["legacy_short_preview"] = True
+                out["note"] = (
+                    "This log was saved with an older body preview limit (500 characters). "
+                    "Re-send the email after upgrading the server for full analysis."
+                )
+            return out
+        except Exception as e:
+            logger.error(f"reanalyze_email_log_for_recipient error: {e}", exc_info=True)
             return {"error": "not_found"}
     
     async def _store_detected_entity(self, entity: Dict, source_text_hash: str,

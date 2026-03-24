@@ -2264,8 +2264,8 @@ function showAlertDetails(alertId, alertData) {
                         </svg>
                     </button>
                 </div>
-                <div class="alert-summary-section">
-                    <div class="summary-row">
+                <div class="alert-summary-section alert-summary-section--compact">
+                    <div class="summary-row summary-row-inline">
                         <div class="summary-item">
                             <span class="summary-label">Severity</span>
                             <span class="badge badge-${severityClass}">${alert.severity || 'N/A'}</span>
@@ -2630,7 +2630,7 @@ function displayMonitoringLogs(logs) {
     let html = '<h3 style="margin-top: 24px; margin-bottom: 16px;">Recent Logs</h3><div class="table-container"><table class="logs-table"><thead><tr><th>Time</th><th>Event Type</th><th>Level</th><th>Message</th><th>Source</th><th>To</th></tr></thead><tbody>';
     
     logs.forEach(log => {
-        const time = log.created_at_server || (log.created_at ? new Date(log.created_at).toLocaleString() : 'N/A');
+        const time = formatAlertTimeLocal(log.created_at, log.created_at_server || 'N/A');
         const toRecipients = (log.metadata && log.metadata.to) ? (Array.isArray(log.metadata.to) ? log.metadata.to.join(', ') : String(log.metadata.to)) : '—';
         html += `
             <tr>
@@ -2992,8 +2992,8 @@ function showOperationDetailsModal(operation, userInfo) {
                         </svg>
                     </button>
                 </div>
-                <div class="alert-summary-section">
-                    <div class="summary-row">
+                <div class="alert-summary-section alert-summary-section--compact">
+                    <div class="summary-row summary-row-inline">
                         <div class="summary-item">
                             <span class="summary-label">Action</span>
                             <span class="badge badge-${actionClass}">${actionTaken}</span>
@@ -3247,7 +3247,7 @@ async function loadEmailList(page) {
             const from = ed.from || '—';
             const to = Array.isArray(ed.to) ? ed.to.join(', ') : (ed.to || '—');
             const subject = ed.subject || '—';
-            const date = log.created_at_server || (log.created_at ? new Date(log.created_at).toLocaleString() : '—');
+            const date = formatAlertTimeLocal(log.created_at, log.created_at_server || '—');
             const attCount = ed.attachment_count > 0 ? ed.attachment_count : (ed.attachment_names && ed.attachment_names.length ? ed.attachment_names.length : 0);
             const attLabel = attCount > 0 ? attCount + ' file(s)' : '—';
             html += `<tr class="table-row-clickable" data-log-id="${escapeHtml(log.id)}" title="Click to view email">`;
@@ -3275,9 +3275,164 @@ async function loadEmailList(page) {
     }
 }
 
+function emailAnalysisNeedsOnDemandFetch(ed) {
+    if (!Array.isArray(ed.detected_entities)) return true;
+    if (ed.detected_entities.length > 0) return false;
+    if (ed.sensitive_data_detected === false) return false;
+    return true;
+}
+
+function buildEmailAnalysisSummaryRowFromLog(ed, escapeHtml) {
+    const ents = ed.detected_entities;
+    const hasSensitive = ed.sensitive_data_detected === true;
+    const summaryParts = [];
+    if (ed.sensitive_data_detected !== undefined && ed.sensitive_data_detected !== null) {
+        summaryParts.push(
+            `<span class="email-analysis-badge ${hasSensitive ? 'email-analysis-badge--warn' : 'email-analysis-badge--ok'}">${escapeHtml(hasSensitive ? 'Sensitive data detected' : 'No sensitive data')}</span>`
+        );
+    }
+    if (ed.policies_matched !== undefined && ed.policies_matched !== null) {
+        summaryParts.push(
+            `<span class="email-analysis-badge">${escapeHtml(ed.policies_matched ? 'Policies matched' : 'No policy match')}</span>`
+        );
+    }
+    if (ed.analysis_action) {
+        summaryParts.push(
+            `<span class="email-analysis-badge email-analysis-badge--action">${escapeHtml(String(ed.analysis_action))}</span>`
+        );
+    }
+    return summaryParts.length ? `<div class="email-analysis-summary-row">${summaryParts.join('')}</div>` : '';
+}
+
+function renderEmailAnalysisSummaryFromApi(data, escapeHtml) {
+    const parts = [];
+    if (typeof data.sensitive_data_detected === 'boolean') {
+        parts.push(
+            `<span class="email-analysis-badge ${data.sensitive_data_detected ? 'email-analysis-badge--warn' : 'email-analysis-badge--ok'}">${escapeHtml(data.sensitive_data_detected ? 'Sensitive data detected' : 'No sensitive data')}</span>`
+        );
+    }
+    const src = data.source;
+    if (src === 'recomputed_from_stored_text') {
+        parts.push('<span class="email-analysis-badge">Recomputed from stored text</span>');
+    } else if (src === 'from_log_snapshot') {
+        parts.push('<span class="email-analysis-badge">From stored snapshot</span>');
+    }
+    return parts.length ? `<div class="email-analysis-summary-row">${parts.join('')}</div>` : '';
+}
+
+function buildEmailEntitiesTableHtml(ents, escapeHtml) {
+    if (!Array.isArray(ents) || ents.length === 0) return '';
+    const rows = ents
+        .map(
+            (e) =>
+                `<tr><td>${escapeHtml(e.entity_type != null ? String(e.entity_type) : '—')}</td>` +
+                `<td class="email-entity-value-cell">${escapeHtml(e.value != null ? String(e.value) : '—')}</td>` +
+                `<td>${e.score != null ? escapeHtml(String(e.score)) : '—'}</td></tr>`
+        )
+        .join('');
+    return (
+        '<div class="email-entities-table-wrap">' +
+        '<table class="logs-table email-entities-table"><thead><tr><th>Type</th><th>Value</th><th>Score</th></tr></thead>' +
+        `<tbody>${rows}</tbody></table></div>`
+    );
+}
+
+async function loadEmailDetailAnalysis(logId, escapeHtml) {
+    const wrap = document.getElementById('emailDetailAnalysisEntitiesWrap');
+    const sumRow = document.getElementById('emailDetailAnalysisSummaryRow');
+    if (!wrap || !logId) return;
+    try {
+        const response = await fetch(`/api/monitoring/email/log/${encodeURIComponent(logId)}/analysis`, {
+            headers: getAuthHeaders()
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            const msg = data && data.detail != null ? String(data.detail) : response.statusText || 'Request failed';
+            wrap.innerHTML = '<p class="text-danger">' + escapeHtml(msg) + '</p>';
+            return;
+        }
+        if (sumRow) {
+            sumRow.innerHTML = renderEmailAnalysisSummaryFromApi(data, escapeHtml);
+        }
+        let note = '';
+        if (data.source === 'recomputed_from_stored_text') {
+            note =
+                '<p class="text-muted email-analysis-source-note">Results computed from stored text (body preview, decrypted body when available, and attachment extracts).</p>';
+        }
+        if (data.note === 'no_stored_text') {
+            note = '<p class="text-muted email-analysis-source-note">No analyzable text was stored for this message.</p>';
+        } else if (data.note) {
+            note +=
+                '<p class="text-warning email-analysis-source-note" style="margin-top:8px;">' +
+                escapeHtml(data.note) +
+                '</p>';
+        }
+        const ents = data.detected_entities || [];
+        if (ents.length === 0) {
+            wrap.innerHTML = note + '<p class="text-muted">No entities detected.</p>';
+            return;
+        }
+        wrap.innerHTML = note + buildEmailEntitiesTableHtml(ents, escapeHtml);
+    } catch (e) {
+        wrap.innerHTML = '<p class="text-danger">' + escapeHtml(e.message || String(e)) + '</p>';
+    }
+}
+
+function buildEmailAnalysisSectionHtml(ed, escapeHtml, opts) {
+    opts = opts || {};
+    const showLoading = !!opts.showLoadingPlaceholder;
+    const ents = ed.detected_entities;
+    const hasSnapshot = Array.isArray(ents);
+    const noSensitive = ed.sensitive_data_detected === false;
+    const summaryRow = buildEmailAnalysisSummaryRowFromLog(ed, escapeHtml);
+
+    let policiesHtml = '';
+    const apps = ed.applied_policies_summary;
+    if (Array.isArray(apps) && apps.length > 0) {
+        policiesHtml =
+            '<ul class="email-applied-policies-list">' +
+            apps
+                .map((p) => {
+                    const sev = p.severity ? ` (${escapeHtml(String(p.severity))})` : '';
+                    return `<li><strong>${escapeHtml(p.name != null ? String(p.name) : '—')}</strong> — ${escapeHtml(p.action != null ? String(p.action) : '—')}${sev}</li>`;
+                })
+                .join('') +
+            '</ul>';
+    }
+
+    let entitiesInner = '';
+    if (!hasSnapshot) {
+        entitiesInner = showLoading
+            ? '<p class="text-muted email-analysis-loading-msg">Running detection on stored content…</p>'
+            : '<p class="text-muted">No analysis snapshot stored for this message (older log).</p>';
+    } else if (ents.length === 0) {
+        entitiesInner =
+            '<p class="text-muted">' +
+            (noSensitive ? 'No entities detected.' : 'No entities in stored snapshot.') +
+            '</p>';
+    } else {
+        entitiesInner = buildEmailEntitiesTableHtml(ents, escapeHtml);
+    }
+
+    return (
+        '<div class="detail-section email-analysis-section">' +
+        '<h4>Analysis</h4>' +
+        '<div id="emailDetailAnalysisSummaryRow">' +
+        summaryRow +
+        '</div>' +
+        (policiesHtml ? '<h5 class="email-detected-entities-heading">Applied policies</h5>' + policiesHtml : '') +
+        '<h5 class="email-detected-entities-heading">Detected entities</h5>' +
+        '<div id="emailDetailAnalysisEntitiesWrap">' +
+        entitiesInner +
+        '</div>' +
+        '</div>'
+    );
+}
+
 function showEmailDetailModal(log) {
-    if (!log || !log.email_data) return;
-    const ed = log.email_data;
+    if (!log) return;
+    const ed = log.email_data || log.extra_data || {};
+    if (!ed || (typeof ed === 'object' && !Object.keys(ed).length)) return;
     const escapeHtml = (v) => {
         const d = document.createElement('div');
         d.textContent = v == null ? '' : String(v);
@@ -3286,7 +3441,7 @@ function showEmailDetailModal(log) {
     const from = ed.from || '—';
     const to = Array.isArray(ed.to) ? ed.to.join(', ') : (ed.to || '—');
     const subject = ed.subject || '—';
-    const date = log.created_at_server || (log.created_at ? new Date(log.created_at).toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
+    const date = formatAlertTimeLocal(log.created_at, log.created_at_server || '—');
     const attachmentNames = ed.attachment_names || [];
     const attachmentContents = ed.attachment_contents || [];
     const attachmentsHtml = attachmentNames.length
@@ -3295,11 +3450,14 @@ function showEmailDetailModal(log) {
     const bodyPreview = ed.encrypted_body != null ? ed.encrypted_body : ed.body_preview;
     const bodyLabel = ed.encrypted_body != null ? 'Body (encrypted)' : 'Body';
     const bodyHtml = bodyPreview
-        ? '<pre class="activity-metadata" style="max-height:200px;overflow:auto;white-space:pre-wrap;">' + escapeHtml(bodyPreview) + '</pre>'
+        ? '<pre class="activity-metadata email-detail-body-pre">' + escapeHtml(bodyPreview) + '</pre>'
         : '<p class="text-muted">Body was not stored.</p>';
+    const needsFetch = emailAnalysisNeedsOnDemandFetch(ed);
+    const analysisHtml = buildEmailAnalysisSectionHtml(ed, escapeHtml, { showLoadingPlaceholder: needsFetch });
+    const logIdAttr = escapeHtml(log.id != null ? String(log.id) : '');
     const modalHtml = `
         <div class="modal-overlay show" id="emailDetailModal" onclick="closeDetailsModal(event)">
-            <div class="modal-content alert-details-modal" style="max-width:560px;" onclick="event.stopPropagation()">
+            <div class="modal-content alert-details-modal email-detail-dialog" data-log-id="${logIdAttr}" onclick="event.stopPropagation()">
                 <div class="alert-modal-header">
                     <div class="alert-header-content">
                         <h2 class="alert-incident-title">Email</h2>
@@ -3312,6 +3470,7 @@ function showEmailDetailModal(log) {
                     <div class="detail-section"><h4>Subject</h4><p class="detail-value">${escapeHtml(subject)}</p></div>
                     <div class="detail-section"><h4>Date</h4><p class="detail-value">${escapeHtml(date)}</p></div>
                     <div class="detail-section"><h4>Attachments</h4>${attachmentsHtml}</div>
+                    ${analysisHtml}
                     <div class="detail-section"><h4>${bodyLabel}</h4>${bodyHtml}</div>
                 </div>
                 <div class="alert-modal-actions">
@@ -3325,6 +3484,9 @@ function showEmailDetailModal(log) {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
     const emailModal = document.getElementById('emailDetailModal');
     if (emailModal && typeof initDraggableCards === 'function') initDraggableCards(emailModal);
+    if (needsFetch && log.id) {
+        loadEmailDetailAnalysis(log.id, escapeHtml);
+    }
 }
 
 async function decryptEmailContent(buttonElement) {
@@ -3439,56 +3601,97 @@ async function testEmail(event) {
         }
         
         let resultHtml = '<div class="email-result">';
-        resultHtml += `<h4>Email Analysis Result</h4>`;
+        resultHtml += `<div class="email-result-header">
+            <h4>📧 Email Analysis Results</h4>
+            <span class="email-result-date">${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+        </div>`;
+
         if (emailData.attachments && emailData.attachments.length > 0) {
-resultHtml += `<p class="text-muted" style="margin-top:4px;">${emailData.attachments.length} attachment(s) analyzed with the email.</p>`;
+            resultHtml += `<div class="email-attachments-info">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-4.24 4.24a2 2 0 0 1-2.83-2.83l2.83-2.83"></path>
+                </svg>
+                <span>${emailData.attachments.length} attachment(s) analyzed with the email</span>
+            </div>`;
         }
-        
+
         // Get analysis result (may be nested in analysis field)
         const analysis = result.analysis || result;
         const policiesMatched = analysis.policies_matched || false;
         const appliedPolicies = analysis.applied_policies || [];
         const actionsTaken = analysis.actions_taken || [];
-        
+
+        // Overall status banner
         if (analysis.sensitive_data_detected) {
             // Show message based on whether policies matched
             if (policiesMatched && appliedPolicies.length > 0) {
-                resultHtml += `<div class="alert-banner alert-danger">`;
-                resultHtml += `<strong>⚠️ Sensitive Data Detected - Policies Applied!</strong>`;
-                resultHtml += `<p>${analysis.message || result.message || 'Sensitive data detected and policies applied'}</p>`;
+                resultHtml += `<div class="alert-banner alert-danger email-alert-banner">`;
+                resultHtml += `<div class="alert-banner-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                        <line x1="12" y1="9" x2="12" y2="13"></line>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                </div>`;
+                resultHtml += `<div class="alert-banner-content">
+                    <strong>⚠️ Policy Violation Detected!</strong>
+                    <p>${analysis.message || result.message || 'Sensitive data detected and policies were applied'}</p>
+                </div>`;
                 resultHtml += `</div>`;
             } else {
-                resultHtml += `<div class="alert-banner alert-info">`;
-                resultHtml += `<strong>⚠️ Sensitive Data Detected</strong>`;
-                resultHtml += `<p>${analysis.message || result.message || 'Sensitive data detected but no matching policies'}</p>`;
+                resultHtml += `<div class="alert-banner alert-info email-alert-banner">`;
+                resultHtml += `<div class="alert-banner-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                </div>`;
+                resultHtml += `<div class="alert-banner-content">
+                    <strong>ℹ️ Sensitive Data Detected</strong>
+                    <p>${analysis.message || result.message || 'Sensitive data detected but no matching policies'}</p>
+                </div>`;
                 resultHtml += `</div>`;
             }
             
-            // Show applied policies
+            // Show applied policies with enhanced visualization
             if (appliedPolicies.length > 0) {
-                resultHtml += `<h5 style="margin-top: 20px;">Applied Policies (${appliedPolicies.length}):</h5>`;
-                resultHtml += '<div style="margin-bottom: 20px;">';
+                resultHtml += `<div class="policies-section">`;
+                resultHtml += `<h5 class="policies-section-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                    Violated Policies (${appliedPolicies.length})
+                </h5>`;
+                resultHtml += `<div class="policies-list">`;
+
                 appliedPolicies.forEach(policy => {
-                    const actionBadge = policy.action === 'block' ? 'badge-danger' : policy.action === 'encrypt' ? 'badge-success' : policy.action === 'alert' ? 'badge-warning' : 'badge-info';
-                    const severityBadge = policy.severity === 'critical' || policy.severity === 'high' ? 'badge-danger' : policy.severity === 'medium' ? 'badge-warning' : 'badge-info';
+                    const actionBadgeClass = policy.action === 'block' ? 'policy-badge-danger' : policy.action === 'encrypt' ? 'policy-badge-success' : policy.action === 'alert' ? 'policy-badge-warning' : 'policy-badge-info';
+                    const actionIcon = policy.action === 'block' ? '🚫' : policy.action === 'encrypt' ? '🔒' : policy.action === 'alert' ? '⚠️' : 'ℹ️';
+                    const severityBadgeClass = policy.severity === 'critical' || policy.severity === 'high' ? 'policy-badge-danger' : policy.severity === 'medium' ? 'policy-badge-warning' : 'policy-badge-info';
                     const escE = (s) => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
                     const matchedStrE = (policy.matched_entities || []).map(e => escE(e)).join(', ');
+
                     resultHtml += `
-                        <div style="padding: 12px; margin-bottom: 8px; background: var(--light); border-radius: 8px; border-left: 4px solid var(--primary);">
-                            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 4px;">
-                                <strong>${escE(policy.name)}</strong>
-                                <div>
-                                    <span class="badge ${actionBadge}" style="margin-right: 8px;">${escE(policy.action)}</span>
-                                    <span class="badge ${severityBadge}">${escE(policy.severity)}</span>
+                        <div class="policy-card">
+                            <div class="policy-card-header">
+                                <div class="policy-name">${actionIcon} ${escE(policy.name)}</div>
+                                <div class="policy-badges">
+                                    <span class="policy-badge ${actionBadgeClass}">${escE(policy.action)}</span>
+                                    <span class="policy-badge ${severityBadgeClass}">${escE(policy.severity)}</span>
                                 </div>
                             </div>
-                            <div style="font-size: 0.9rem; color: var(--text-muted); margin-top: 4px;">
-                                Matched: ${matchedStrE} (${policy.matched_count} found)
+                            <div class="policy-matched-entities">
+                                <span class="policy-matched-label">Matched Entities:</span>
+                                <span class="policy-matched-values">${matchedStrE}</span>
+                                <span class="policy-matched-count">(${policy.matched_count} found)</span>
                             </div>
                         </div>
                     `;
                 });
-                resultHtml += '</div>';
+
+                resultHtml += '</div></div>';
             }
             
             // Show action status: block | alert | encrypt
@@ -4395,7 +4598,7 @@ function showAlertDialog(alert) {
         : '<span class="text-muted">No entities detected</span>';
 
     overlay.innerHTML = `
-        <div class="modal-content alert-details-modal alert-notification-dialog-content" style="max-width:520px;" onclick="event.stopPropagation()">
+        <div class="modal-content alert-details-modal alert-notification-dialog-content policy-violation-dialog" onclick="event.stopPropagation()">
             <div class="alert-modal-header">
                 <div class="alert-header-content">
                     <h2 class="alert-incident-title">Policy Violation</h2>
@@ -4408,8 +4611,8 @@ function showAlertDialog(alert) {
                     </svg>
                 </button>
             </div>
-            <div class="alert-summary-section">
-                <div class="summary-row">
+            <div class="alert-summary-section alert-summary-section--compact">
+                <div class="summary-row summary-row-inline">
                     <div class="summary-item">
                         <span class="summary-label">Severity</span>
                         <span class="badge badge-${severityClass}">${escapeHtml(severity)}</span>

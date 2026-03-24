@@ -132,6 +132,8 @@ An integrated system for protecting personal data within organizations, combinin
 
 ## التوثيق / Documentation
 
+- [قائمة الاختصارات (Abbreviations)](docs/ABBREVIATIONS.md) — المصطلحات والاختصارات المستخدمة في المشروع
+- [مخطط جانت (Gantt Chart)](docs/GANTT_CHART.md) — المخطط الزمني للمشروع (منهجية تكرارية)
 - [مخطط السياق (Context Diagram)](docs/CONTEXT_DIAGRAM_SPEC.md) — مواصفات مخطط السياق للنظام وبرومبت لإنشائه
 - [مخطط علاقات الكيانات (ERD)](docs/ERD_SPEC.md) — مواصفات ERD وبرومبت لإنشائه
 - [كيان المستخدمين — العناصر والسمات](docs/USER_ENTITY_SPEC.md) — مواصفات كيان Users وبرومبت لإنشائه

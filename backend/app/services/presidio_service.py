@@ -120,6 +120,8 @@ class PresidioService:
         sql_patterns = [
             (r"'\s*OR\s*['\"]?\s*1\s*=\s*1", 'SQL injection OR 1=1', 0.95),
             (r"'\s*OR\s*['\"]?\s*'['\"]?\s*=\s*['\"]", 'SQL injection OR condition', 0.9),
+            # Classic SELECT ... WHERE ... OR '1'='1'
+            (r"SELECT\s+\*\s+FROM\s+\w+\s+WHERE\s+[^;]+OR\s+['\"]1['\"]\s*=\s*['\"]1", 'SQL injection SELECT WHERE OR', 0.92),
             (r'UNION\s+SELECT', 'SQL UNION SELECT', 0.95),
             (r'DROP\s+TABLE', 'SQL DROP TABLE', 0.9),
             (r'DELETE\s+FROM', 'SQL DELETE', 0.85),
@@ -161,6 +163,195 @@ class PresidioService:
                 })
         
         return detected_scripts
+
+    def _scan_ibans(self, text: str) -> List[Dict[str, Any]]:
+        """
+        IBAN detection (same rules everywhere). Used by regex analyzer and post-processing Presidio results.
+        """
+        out: List[Dict[str, Any]] = []
+        # Do not use \s in the capture group — it matches newlines and can swallow the next line (e.g. "US SSN")
+        iban_labeled_pattern = r'(?:IBAN|الآيبان|رقم الآيبان)\s*:?\s*([A-Z0-9][A-Z0-9 ]{14,34})'
+        for match in re.finditer(iban_labeled_pattern, text, re.IGNORECASE):
+            iban_value = match.group(1).strip()
+            iban_value = re.sub(r'\s*\([^)]*\).*$', '', iban_value).strip().replace(' ', '')
+            if 15 <= len(iban_value) <= 34 and re.match(r'^[A-Z]{2}\d{2}[A-Z0-9]+$', iban_value):
+                if iban_value.startswith('SA') and len(iban_value) != 24:
+                    continue
+                out.append({
+                    "entity_type": "IBAN_CODE",
+                    "start": match.start(1),
+                    "end": match.end(1),
+                    "score": 0.85,
+                    "value": iban_value
+                })
+        iban_pattern = r'\b([A-Z]{2}\d{2}[A-Z0-9]{4,30})\b'
+        for match in re.finditer(iban_pattern, text):
+            value = match.group(1)
+            if 15 <= len(value) <= 34:
+                if value.startswith('SA') and len(value) != 24:
+                    continue
+                out.append({
+                    "entity_type": "IBAN_CODE",
+                    "start": match.start(),
+                    "end": match.end(),
+                    "score": 0.75,
+                    "value": value
+                })
+        return out
+
+    @staticmethod
+    def _span_inside_spans(start: int, end: int, spans: List[tuple]) -> bool:
+        for s, e in spans:
+            if s <= start and end <= e:
+                return True
+        return False
+
+    @staticmethod
+    def _spans_overlap(a: tuple, b: tuple) -> bool:
+        s1, e1 = a
+        s2, e2 = b
+        return not (e1 <= s2 or e2 <= s1)
+
+    def _dedupe_ibans(self, ibans: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Keep one IBAN per normalized value; prefer longer span (labeled line), then higher score."""
+        by_val: Dict[str, Dict[str, Any]] = {}
+        for e in ibans:
+            if e.get("entity_type") != "IBAN_CODE":
+                continue
+            v = (e.get("value") or "").strip().replace(" ", "").upper()
+            if not v:
+                continue
+            cur = by_val.get(v)
+            span_len = e["end"] - e["start"]
+            if cur is None:
+                by_val[v] = e
+                continue
+            cur_len = cur["end"] - cur["start"]
+            if span_len > cur_len:
+                by_val[v] = e
+            elif span_len == cur_len and e.get("score", 0) > cur.get("score", 0):
+                by_val[v] = e
+        return list(by_val.values())
+
+    def _dedupe_locations(self, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Drop duplicate LOCATION with same normalized value (keep highest score)."""
+        locs = [e for e in entities if e.get("entity_type") == "LOCATION"]
+        rest = [e for e in entities if e.get("entity_type") != "LOCATION"]
+        seen: Dict[str, Dict[str, Any]] = {}
+        for e in locs:
+            key = (e.get("value") or "").strip().lower()
+            if not key:
+                rest.append(e)
+                continue
+            prev = seen.get(key)
+            if prev is None or e.get("score", 0) > prev.get("score", 0):
+                seen[key] = e
+            elif e.get("score", 0) == prev.get("score", 0) and (e["end"] - e["start"]) > (prev["end"] - prev["start"]):
+                seen[key] = e
+        rest.extend(seen.values())
+        return rest
+
+    @staticmethod
+    def _strip_address_false_ips(entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Drop ADDRESS when value is only an IPv4 (Presidio sometimes labels 'IP Address' lines as ADDRESS)."""
+        ipv4 = re.compile(
+            r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+        )
+        out: List[Dict[str, Any]] = []
+        for e in entities:
+            if e.get("entity_type") == "ADDRESS" and ipv4.match((e.get("value") or "").strip()):
+                continue
+            out.append(e)
+        return out
+
+    def _supplement_labeled_fields(self, text: str, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Add PERSON / ADDRESS / ORGANIZATION from labeled lines when Presidio missed them
+        and no existing entity of the same type overlaps the span (LOCATION etc. may overlap ADDRESS text).
+        """
+        def overlaps_same_type(start: int, end: int, entity_type: str) -> bool:
+            for e in entities:
+                if e.get("entity_type") != entity_type:
+                    continue
+                if e["end"] <= start or e["start"] >= end:
+                    continue
+                return True
+            return False
+
+        extra: List[Dict[str, Any]] = []
+        # Name: rest of line (supports hyphenated surnames e.g. Ahmed Al-Qahtani)
+        for match in re.finditer(r'(?:^|\n)\s*(?:Name|اسم)\s*:?\s*([^\n]+)', text):
+            raw = match.group(1).strip()
+            if len(raw) < 2 or '@' in raw or re.match(r'^\d', raw):
+                continue
+            if overlaps_same_type(match.start(1), match.end(1), "PERSON"):
+                continue
+            extra.append({
+                "entity_type": "PERSON",
+                "start": match.start(1),
+                "end": match.end(1),
+                "score": 0.88,
+                "value": raw,
+            })
+        # Line must start with "Address" — avoids matching "IP Address:"
+        address_labeled_pattern = rf'(?:^|\n)\s*(?:Address|العنوان)\s*:?\s*([^\n]{{10,100}})'
+        for match in re.finditer(address_labeled_pattern, text, re.IGNORECASE):
+            address_value = match.group(1).strip()
+            address_value = re.sub(r'\s*\([^)]*\).*$', '', address_value).strip()
+            if len(address_value) < 10 or '@' in address_value:
+                continue
+            if overlaps_same_type(match.start(1), match.end(1), "ADDRESS"):
+                continue
+            extra.append({
+                "entity_type": "ADDRESS",
+                "start": match.start(1),
+                "end": match.end(1),
+                "score": 0.86,
+                "value": address_value,
+            })
+        org_labeled_pattern = rf'(?:^|\n)\s*(?:Organization|المنظمة|الشركة)\s*:?\s*([^\n]{{3,80}})'
+        for match in re.finditer(org_labeled_pattern, text, re.IGNORECASE):
+            org_value = match.group(1).strip()
+            org_value = re.sub(r'\s*\([^)]*\).*$', '', org_value).strip()
+            if len(org_value) < 3:
+                continue
+            if overlaps_same_type(match.start(1), match.end(1), "ORGANIZATION"):
+                continue
+            extra.append({
+                "entity_type": "ORGANIZATION",
+                "start": match.start(1),
+                "end": match.end(1),
+                "score": 0.86,
+                "value": org_value,
+            })
+        return extra
+
+    def _post_process_entities(self, text: str, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        - Merge regex IBANs (fixes Presidio missing IBAN + CC false positives inside IBAN).
+        - Remove CREDIT_CARD fully contained in any IBAN span.
+        - Deduplicate LOCATION by value.
+        - Add labeled PERSON/ADDRESS/ORGANIZATION when missing.
+        """
+        iban_from_regex = self._scan_ibans(text)
+        iban_existing = [e for e in entities if e.get("entity_type") == "IBAN_CODE"]
+        merged_ibans = self._dedupe_ibans(iban_existing + iban_from_regex)
+        iban_spans = [(e["start"], e["end"]) for e in merged_ibans]
+
+        non_iban = [e for e in entities if e.get("entity_type") != "IBAN_CODE"]
+        filtered = []
+        for e in non_iban:
+            if e.get("entity_type") == "CREDIT_CARD" and self._span_inside_spans(e["start"], e["end"], iban_spans):
+                continue
+            filtered.append(e)
+        merged = filtered + merged_ibans
+        merged = self._dedupe_locations(merged)
+        merged = self._strip_address_false_ips(merged)
+        merged.sort(key=lambda x: x["start"])
+        supplements = self._supplement_labeled_fields(text, merged)
+        merged.extend(supplements)
+        merged.sort(key=lambda x: x["start"])
+        return merged
     
     def _analyze_with_regex(self, text: str) -> List[Dict[str, Any]]:
         """Fallback regex-based analysis"""
@@ -288,39 +479,7 @@ class PresidioService:
                     "value": value
                 })
         
-        # IBAN Code pattern (2 letters + 2 digits + up to 30 alphanumeric)
-        # Saudi (SA) IBAN is exactly 24 chars; other lengths with SA are likely Tax Number
-        # Pattern 1: "IBAN:" or "الآيبان:" followed by IBAN
-        iban_labeled_pattern = r'(?:IBAN|الآيبان|رقم الآيبان)\s*:?\s*([A-Z0-9\s]{15,35})'
-        for match in re.finditer(iban_labeled_pattern, text, re.IGNORECASE):
-            iban_value = match.group(1).strip()
-            iban_value = re.sub(r'\s*\([^)]*\).*$', '', iban_value).strip().replace(' ', '')
-            if 15 <= len(iban_value) <= 34 and re.match(r'^[A-Z]{2}\d{2}[A-Z0-9]+$', iban_value):
-                if iban_value.startswith('SA') and len(iban_value) != 24:
-                    continue
-                detected_entities.append({
-                    "entity_type": "IBAN_CODE",
-                    "start": match.start(1),
-                    "end": match.end(1),
-                    "score": 0.85,
-                    "value": iban_value
-                })
-        
-        # Pattern 2: Standalone IBAN codes (country-specific length: e.g. Saudi SA = 24 chars)
-        iban_pattern = r'\b([A-Z]{2}\d{2}[A-Z0-9]{4,30})\b'
-        for match in re.finditer(iban_pattern, text):
-            value = match.group(1)
-            if 15 <= len(value) <= 34:
-                # Saudi IBAN (SA) must be exactly 24 characters; otherwise it's likely Tax Number
-                if value.startswith('SA') and len(value) != 24:
-                    continue
-                detected_entities.append({
-                    "entity_type": "IBAN_CODE",
-                    "start": match.start(),
-                    "end": match.end(),
-                    "score": 0.75,
-                    "value": value
-                })
+        detected_entities.extend(self._scan_ibans(text))
         
         # US SSN pattern (XXX-XX-XXXX or XXX XX XXXX)
         ssn_pattern = r'\b\d{3}[-.\s]?\d{2}[-.\s]?\d{4}\b'
@@ -379,9 +538,9 @@ class PresidioService:
         # Arabic: شارع، طريق، حي، مدينة
         # English: Street, Avenue, Road, City, State
         address_keywords_ar = r'(?:شارع|طريق|حي|مدينة|مبنى|مكتب|ص\.ب|صندوق بريد|Address|العنوان)'
-        address_keywords_en = r'(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|City|State|Zip|Postal Code|Address)'
-        # Pattern 1: "Address:" or "العنوان:" followed by address
-        address_labeled_pattern = rf'(?:Address|العنوان)\s*:?\s*([^\n]{10,100})'
+        address_keywords_en = r'(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|City|State|Zip|Postal Code)'
+        # Pattern 1: line starts with "Address:" (not "IP Address:")
+        address_labeled_pattern = rf'(?:^|\n)\s*(?:Address|العنوان)\s*:?\s*([^\n]{10,100})'
         for match in re.finditer(address_labeled_pattern, text, re.IGNORECASE):
             address_value = match.group(1).strip()
             # Remove trailing parentheses and extra info
@@ -415,8 +574,8 @@ class PresidioService:
         # English: Inc, Corp, LLC, Ltd, Company, Bank, Organization
         org_keywords_ar = r'(?:شركة|مؤسسة|بنك|جمعية|هيئة|منظمة)'
         org_keywords_en = r'(?:Inc|Corp|LLC|Ltd|Company|Co|Bank|Organization|Org|Corporation)'
-        # Pattern 1: "Organization:" or "المنظمة:" followed by name
-        org_labeled_pattern = rf'(?:Organization|المنظمة|الشركة)\s*:?\s*([^\n]{3,80})'
+        # Pattern 1: line starts with "Organization:" (avoid matching mid-line "Organization")
+        org_labeled_pattern = rf'(?:^|\n)\s*(?:Organization|المنظمة|الشركة)\s*:?\s*([^\n]{3,80})'
         for match in re.finditer(org_labeled_pattern, text, re.IGNORECASE):
             org_value = match.group(1).strip()
             # Remove trailing parentheses
@@ -584,7 +743,7 @@ class PresidioService:
         stock_label_blocklist = {'ISIN', 'SEC', 'ETF', 'NYSE', 'NASDAQ', 'TICKER', 'SYMBOL', 'MARKET', 'SR', 'SA'}
         # Pattern 1: Stock symbols (e.g. AAPL, MSFT, 2222.SR)
         stock_symbol_pattern = r'\b([A-Z]{2,5}(?:\.[A-Z]{2})?)\b'
-        stock_keywords = r'(?:Stock|Share|سهم|أسهم|رمز السهم|Ticker)'
+        stock_keywords = r'(?:Stock|Share|سهم|أسهم|رمز السهم|Ticker|Market|تداول)'
         for match in re.finditer(stock_symbol_pattern, text):
             value = match.group(1)
             if value.upper() in stock_label_blocklist:
@@ -599,6 +758,20 @@ class PresidioService:
                     "start": match.start(),
                     "end": match.end(),
                     "score": 0.8,
+                    "value": value
+                })
+        # Tadawul-style numeric tickers (e.g. 2222.SR)
+        for match in re.finditer(r'\b(\d{4}\.(?:SR|SA|TADAWUL))\b', text, re.IGNORECASE):
+            value = match.group(1)
+            ctx_start = max(0, match.start() - 50)
+            ctx_end = min(len(text), match.end() + 40)
+            context = text[ctx_start:ctx_end]
+            if re.search(stock_keywords, context, re.IGNORECASE):
+                detected_entities.append({
+                    "entity_type": "STOCK",
+                    "start": match.start(),
+                    "end": match.end(),
+                    "score": 0.82,
                     "value": value
                 })
         # Pattern 2: ISIN (2 letters + 9 alphanumeric + 1 digit) — report as ISIN_CODE
@@ -658,7 +831,7 @@ class PresidioService:
             detected.append({"entity_type": "TAX", "start": match.start(1), "end": match.end(1), "score": 0.8, "value": match.group(1).strip()})
         # Stock patterns (skip label words and market suffixes SR, SA)
         stock_label_blocklist = {'ISIN', 'SEC', 'ETF', 'NYSE', 'NASDAQ', 'TICKER', 'SYMBOL', 'MARKET', 'SR', 'SA'}
-        stock_keywords = r'(?:Stock|Share|سهم|أسهم|رمز السهم|Ticker)'
+        stock_keywords = r'(?:Stock|Share|سهم|أسهم|رمز السهم|Ticker|Market|تداول)'
         for match in re.finditer(r'\b([A-Z]{2,5}(?:\.[A-Z]{2})?)\b', text):
             value = match.group(1)
             if value.upper() in stock_label_blocklist:
@@ -666,6 +839,10 @@ class PresidioService:
             ctx = text[max(0, match.start() - 40):min(len(text), match.end() + 40)]
             if re.search(stock_keywords, ctx, re.IGNORECASE) or re.search(r'\.(SR|SA|TADAWUL)', value):
                 detected.append({"entity_type": "STOCK", "start": match.start(), "end": match.end(), "score": 0.8, "value": value})
+        for match in re.finditer(r'\b(\d{4}\.(?:SR|SA|TADAWUL))\b', text, re.IGNORECASE):
+            ctx = text[max(0, match.start() - 50):min(len(text), match.end() + 40)]
+            if re.search(stock_keywords, ctx, re.IGNORECASE):
+                detected.append({"entity_type": "STOCK", "start": match.start(), "end": match.end(), "score": 0.82, "value": match.group(1)})
         for match in re.finditer(r'\b([A-Z]{2}[A-Z0-9]{9}\d)\b', text):
             detected.append({"entity_type": "ISIN_CODE", "start": match.start(), "end": match.end(), "score": 0.85, "value": match.group()})
         # Profit patterns
@@ -747,6 +924,7 @@ class PresidioService:
                     if not (e.get("entity_type") == "IBAN_CODE" and e.get("value", "").strip() in tax_values)
                 ]
                 
+                detected_entities = self._post_process_entities(text, detected_entities)
                 logger.info(f"Detected {len(detected_entities)} entities in text (including {len(malicious_scripts)} scripts)")
                 return detected_entities
                 
@@ -805,7 +983,7 @@ class PresidioService:
             sensitive_data = filtered_data
         
         detected_entities.extend(sensitive_data)
-        
+        detected_entities = self._post_process_entities(text, detected_entities)
         logger.info(f"Detected {len(detected_entities)} entities using regex patterns (including {len(malicious_scripts)} scripts)")
         return detected_entities
     
