@@ -711,8 +711,17 @@ async function analyzeFile(file) {
         formData.append('file', file);
         formData.append('apply_policies', applyPoliciesFile ? applyPoliciesFile.checked : true);
 
+        // Must send Bearer token so backend can set source_user on activity logs (same as text analysis).
+        // Do not set Content-Type: browser sets multipart boundary for FormData.
+        const authHeaders = getAuthHeaders();
+        const fileFetchHeaders = {};
+        if (authHeaders['Authorization']) {
+            fileFetchHeaders['Authorization'] = authHeaders['Authorization'];
+        }
+
         const response = await fetch('/api/analyze/file', {
             method: 'POST',
+            headers: fileFetchHeaders,
             body: formData
         });
 

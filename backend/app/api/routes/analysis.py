@@ -143,12 +143,12 @@ async def analyze_text(
 
 @router.post("/file", response_model=AnalysisResponse)
 async def analyze_file(
+    request: Request,
     file: UploadFile = File(...),
     apply_policies: bool = Form(True),
     source_ip: Optional[str] = Form(None),
     source_user: Optional[str] = Form(None),
     source_device: Optional[str] = Form(None),
-    http_request: Request = None
 ):
     """
     Analyze uploaded file for sensitive data
@@ -195,14 +195,18 @@ async def analyze_file(
                 alert_created=False
             )
         
-        # Try to get current user
-        current_user = await get_optional_user(http_request) if http_request else None
-        # Use current user if logged in and source_user not provided
-        final_source_user = source_user or (current_user.username if current_user else None)
-        
+        # Try to get current user (requires Authorization on the request — frontend sends it for file upload)
+        current_user = await get_optional_user(request)
+        # Match analyze_text: prefer explicit form source_user, else logged-in username or email
+        final_source_user = source_user or (
+            (getattr(current_user, "username", None) or getattr(current_user, "email", None))
+            if current_user
+            else None
+        )
+
         # Get client IP if not provided
-        if not source_ip and http_request:
-            source_ip = http_request.client.host if http_request.client else None
+        if not source_ip and request.client:
+            source_ip = request.client.host
         
         # Log file analysis operation
         try:
