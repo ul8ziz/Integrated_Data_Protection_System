@@ -538,6 +538,7 @@ async def get_user_activities(
             "user_id": str(user.id),
             "username": user.username,
             "email": user.email,
+            "role": user.role.value if getattr(user, "role", None) is not None else "regular",
             "period_days": days,
             "start_date": start_date.isoformat(),
             "end_date": get_current_time().isoformat(),

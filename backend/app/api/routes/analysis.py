@@ -197,8 +197,9 @@ async def analyze_file(
         
         # Try to get current user (requires Authorization on the request — frontend sends it for file upload)
         current_user = await get_optional_user(request)
-        # Match analyze_text: prefer explicit form source_user, else logged-in username or email
-        final_source_user = source_user or (
+        # Prefer explicit form source_user (also sent by client when token may not be parsed), else JWT user
+        su_form = source_user.strip() if isinstance(source_user, str) and source_user.strip() else None
+        final_source_user = su_form or (
             (getattr(current_user, "username", None) or getattr(current_user, "email", None))
             if current_user
             else None

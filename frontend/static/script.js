@@ -710,6 +710,13 @@ async function analyzeFile(file) {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('apply_policies', applyPoliciesFile ? applyPoliciesFile.checked : true);
+        // Attribute logs to this user even if optional JWT parsing fails (regular users must see file analysis in activity).
+        if (typeof currentUser !== 'undefined' && currentUser) {
+            const su = (currentUser.username || currentUser.email || '').trim();
+            if (su) {
+                formData.append('source_user', su);
+            }
+        }
 
         // Must send Bearer token so backend can set source_user on activity logs (same as text analysis).
         // Do not set Content-Type: browser sets multipart boundary for FormData.
@@ -2816,6 +2823,15 @@ function buildUserActivityPagination(pagination, userId) {
     return html;
 }
 
+/** Display label for user role in User Activity Log (all roles, not only admin). */
+function formatActivityRoleLabel(role) {
+    const r = role == null ? '' : String(role).toLowerCase();
+    if (r === 'admin') return 'Admin';
+    if (r === 'manager') return 'Manager';
+    if (r === 'regular') return 'User';
+    return role ? String(role) : 'N/A';
+}
+
 async function loadUserActivityPage(userId, page) {
     const modal = document.getElementById('userActivityModal');
     if (!modal) return;
@@ -2877,7 +2893,11 @@ async function showUserActivityModal(userId) {
 
         const operationsRows = buildUserActivityTableRows(operations, escapeHtml);
         window._lastUserActivityOperations = operations;
-        window._lastUserActivityUser = { username: data.username || '', email: data.email || '' };
+        window._lastUserActivityUser = {
+            username: data.username || '',
+            email: data.email || '',
+            role: data.role || ''
+        };
 
         const paginationHtml = buildUserActivityPagination(pagination, userId);
 
@@ -2892,6 +2912,7 @@ async function showUserActivityModal(userId) {
                         <div class="stats-grid" style="margin-bottom: 16px;">
                             <div class="stat-card"><p>User</p><h3>${escapeHtml(data.username || 'N/A')}</h3></div>
                             <div class="stat-card"><p>Email</p><h3>${escapeHtml(data.email || 'N/A')}</h3></div>
+                            <div class="stat-card"><p>Role</p><h3>${escapeHtml(formatActivityRoleLabel(data.role))}</h3></div>
                             <div class="stat-card"><p>Total Operations</p><h3>${summary.total_operations ?? 0}</h3></div>
                             <div class="stat-card"><p>Analysis Operations</p><h3>${summary.analysis_operations ?? 0}</h3></div>
                         </div>
