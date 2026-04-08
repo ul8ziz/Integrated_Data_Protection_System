@@ -3,23 +3,112 @@ Email monitoring service for detecting and blocking sensitive data in emails - M
 """
 import logging
 import base64
+import re
 import tempfile
 import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from app.services.presidio_service import PresidioService
-from app.services.policy_service import PolicyService
+from app.services.policy_service import PolicyService, entity_type_matches_policy
 from app.services.mydlp_service import MyDLPService
 from app.services.file_extractor_service import FileTextExtractor
+from app.models_mongo.users import User
 from app.models_mongo.logs import Log, DetectedEntity
 from app.models_mongo.alerts import Alert, AlertSeverity, AlertStatus
 from datetime import datetime
 from app.utils.datetime_utils import get_current_time
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 # Stored in inbox log for preview + on-demand re-analysis (avoid tiny 500-char clip)
 EMAIL_LOG_BODY_PREVIEW_MAX = 20000
+
+# Markers for attachment text appended to full_text for Presidio (see analyze_email)
+_ATTACHMENT_HEADER_RE = re.compile(r"\[Attachment: ([^\]]+)\]\n")
+
+
+def attachment_contents_from_encrypted_full_text(
+    encrypted_full_text: str,
+    original_rows: Optional[List[dict]],
+) -> Optional[List[dict]]:
+    """
+    Recover per-file text extracts from the encrypted full analysis string.
+    PolicyService encrypts spans in the entire string (body + attachment blocks); this parses
+    [Attachment: name] sections so inbox/alert previews match the recipient view for attachments.
+    """
+    if not original_rows or not encrypted_full_text:
+        return None
+    matches = list(_ATTACHMENT_HEADER_RE.finditer(encrypted_full_text))
+    if not matches:
+        return None
+    out: List[dict] = []
+    for i, row in enumerate(original_rows):
+        fn = (row.get("filename") or "").strip()
+        m = None
+        if i < len(matches) and (matches[i].group(1) or "").strip() == fn:
+            m = matches[i]
+        else:
+            for mm in matches:
+                if (mm.group(1) or "").strip() == fn:
+                    m = mm
+                    break
+        if not m:
+            out.append(dict(row))
+            continue
+        start = m.end()
+        nxt = _ATTACHMENT_HEADER_RE.search(encrypted_full_text, start)
+        end = nxt.start() if nxt else len(encrypted_full_text)
+        chunk = encrypted_full_text[start:end].rstrip("\n")
+        out.append({"filename": fn, "content": chunk})
+    return out
+
+
+# When policy encrypt applies, recipient download for text-like files should show Fernet tokens, not the raw upload.
+_TEXT_ATTACHMENT_EXT = (
+    ".txt", ".csv", ".log", ".md", ".json", ".xml", ".htm", ".html", ".tsv", ".rtf",
+)
+
+
+def attachment_files_recipient_encrypted_text(
+    attachment_files: Optional[List[dict]],
+    recipient_rows: Optional[List[dict]],
+) -> Optional[List[dict]]:
+    """
+    Replace stored base64 payload with UTF-8 bytes of the encrypted text extract (same as inbox preview)
+    for text-like filenames so opening the downloaded file shows policy encryption.
+    Binary formats (e.g. pdf, docx) keep original bytes; set download_note for admins.
+    """
+    if not attachment_files or not recipient_rows:
+        return attachment_files
+    enc_by_name = {(r.get("filename") or "").strip(): r.get("content") or "" for r in recipient_rows}
+    out: List[dict] = []
+    for af in attachment_files:
+        row = dict(af)
+        fn = (row.get("filename") or "").strip()
+        if not fn or fn not in enc_by_name:
+            out.append(row)
+            continue
+        if row.get("omitted_reason") == "file_too_large" or not row.get("content_base64"):
+            out.append(row)
+            continue
+        lower = fn.lower()
+        if not any(lower.endswith(ext) for ext in _TEXT_ATTACHMENT_EXT):
+            row["download_note"] = (
+                "Original file bytes kept for download; open text extract in the message for encrypted preview."
+            )
+            out.append(row)
+            continue
+        try:
+            text = enc_by_name[fn]
+            raw = text.encode("utf-8")
+            row["content_base64"] = base64.b64encode(raw).decode("ascii")
+            row["content_type"] = "text/plain; charset=utf-8"
+            row["policy_encrypted_download"] = True
+        except Exception as ex:
+            logger.warning("Could not build encrypted download for %s: %s", fn, ex)
+        out.append(row)
+    return out
 
 
 class EmailMonitoringService:
@@ -108,39 +197,72 @@ class EmailMonitoringService:
                 elif isinstance(att, str):
                     attachment_names.append(att)
             
-            # Extract and analyze attachment content if present; keep per-file content for log display
+            # Extract and analyze attachment content; keep text extract + original file (base64) for inbox download
             attachment_texts = []
-            attachment_contents: List[dict] = []  # [{"filename": "...", "content": "..."}]
-            _max_content_len = 5000  # cap per-file content stored in log
+            attachment_contents: List[dict] = []  # [{"filename": "...", "content": "..."}] text preview
+            attachment_files: List[dict] = []  # [{"filename", "content_type", "content_base64"}] for recipient download
+            _max_content_len = 5000  # cap per-file text extract stored in log
+            _max_raw = max(0, int(getattr(settings, "EMAIL_ATTACHMENT_MAX_STORE_BYTES", 5 * 1024 * 1024)))
+
             for att in attachments:
-                if isinstance(att, dict) and att.get("content") and att.get("filename"):
+                if not isinstance(att, dict) or not att.get("filename") or not att.get("content"):
+                    continue
+                filename = att["filename"]
+                content_type = att.get("content_type")
+                try:
+                    raw = base64.b64decode(att["content"], validate=False)
+                except Exception as e:
+                    logger.warning(f"Invalid base64 for attachment {filename}: {e}")
+                    continue
+                if not raw:
+                    continue
+
+                # Original file for UI download (same format as sent), subject to size cap
+                if len(raw) > _max_raw:
+                    logger.warning(
+                        "Attachment %s (%s bytes) exceeds EMAIL_ATTACHMENT_MAX_STORE_BYTES; not storing binary in log",
+                        filename,
+                        len(raw),
+                    )
+                    attachment_files.append({
+                        "filename": filename,
+                        "content_type": content_type,
+                        "content_base64": None,
+                        "omitted_reason": "file_too_large",
+                        "size_bytes": len(raw),
+                    })
+                else:
+                    attachment_files.append({
+                        "filename": filename,
+                        "content_type": content_type,
+                        "content_base64": base64.b64encode(raw).decode("ascii"),
+                    })
+
+                # Text extraction for DLP (optional; unsupported formats still have attachment_files above)
+                if not self.file_extractor.is_supported(filename):
+                    logger.debug(f"Unsupported attachment format for text extract: {filename}")
+                    continue
+
+                ext = Path(filename).suffix.lower()
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+                        tmp.write(raw)
+                        tmp_path = tmp.name
                     try:
-                        raw = base64.b64decode(att["content"])
-                        if not raw:
-                            continue
-                        filename = att["filename"]
-                        ext = Path(filename).suffix.lower()
-                        if not self.file_extractor.is_supported(filename):
-                            logger.debug(f"Unsupported attachment format: {filename}")
-                            continue
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-                            tmp.write(raw)
-                            tmp_path = tmp.name
+                        text = self.file_extractor.extract_text(tmp_path, file_content=raw)
+                        if text and text.strip():
+                            attachment_texts.append(f"[Attachment: {filename}]\n{text.strip()}")
+                            content = text.strip()
+                            if len(content) > _max_content_len:
+                                content = content[:_max_content_len] + "\n[... truncated ...]"
+                            attachment_contents.append({"filename": filename, "content": content})
+                    finally:
                         try:
-                            text = self.file_extractor.extract_text(tmp_path, file_content=raw)
-                            if text and text.strip():
-                                attachment_texts.append(f"[Attachment: {filename}]\n{text.strip()}")
-                                content = text.strip()
-                                if len(content) > _max_content_len:
-                                    content = content[:_max_content_len] + "\n[... truncated ...]"
-                                attachment_contents.append({"filename": filename, "content": content})
-                        finally:
-                            try:
-                                os.unlink(tmp_path)
-                            except Exception:
-                                pass
-                    except Exception as e:
-                        logger.warning(f"Failed to extract text from attachment {att.get('filename', '?')}: {e}")
+                            os.unlink(tmp_path)
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.warning(f"Failed to extract text from attachment {filename}: {e}")
             
             if attachment_texts:
                 full_text += "\n\n" + "\n\n".join(attachment_texts)
@@ -160,6 +282,8 @@ class EmailMonitoringService:
             }
             if attachment_contents:
                 log_extra_data["attachment_contents"] = attachment_contents
+            if attachment_files:
+                log_extra_data["attachment_files"] = attachment_files
 
             if not detected_entities:
                 log_extra_data["body_preview"] = log_body_preview
@@ -180,6 +304,19 @@ class EmailMonitoringService:
                     "message": "No sensitive data detected"
                 }
             
+            # Resolve sender user (for per-user policy assignment) by From email
+            sender_addr = from_email.strip() if isinstance(from_email, str) else ""
+            if "<" in sender_addr and ">" in sender_addr:
+                m = re.search(r"<([^>]+)>", sender_addr)
+                if m:
+                    sender_addr = m.group(1).strip()
+            policy_user = None
+            if sender_addr and "@" in sender_addr:
+                try:
+                    policy_user = await User.find_one({"email": sender_addr})
+                except Exception:
+                    policy_user = None
+
             # Apply policies with detected entities (mark alerts as from email for Blocked Emails stats)
             alert_extra = {"source": "email", "to": to_emails, "body_preview": log_body_preview}
             if attachment_contents:
@@ -191,7 +328,8 @@ class EmailMonitoringService:
                 source_user=source_user,
                 source_device="email_client",
                 source_attachment_names=attachment_names if attachment_names else None,
-                alert_extra_data=alert_extra
+                alert_extra_data=alert_extra,
+                user=policy_user,
             )
             
             # Determine action based on policy result
@@ -200,7 +338,9 @@ class EmailMonitoringService:
                 # No policies matched - allow email and don't create alerts
                 logger.info(f"Email from {from_email} allowed - no matching policies for detected entities")
                 logger.info(f"Detected entity types: {[e['entity_type'] for e in detected_entities]}")
-                logger.info(f"Available policies: {[p.name for p in await self.policy_service.get_active_policies()]}")
+                logger.info(
+                    f"Available policies: {[p.name for p in await self.policy_service.get_active_policies(user=policy_user)]}"
+                )
                 log_extra_data["body_preview"] = log_body_preview
                 log_extra_data["sensitive_data_detected"] = True
                 log_extra_data["detected_entities"] = self._serialize_entities_for_log(detected_entities)
@@ -253,31 +393,81 @@ class EmailMonitoringService:
                 body_start = len(subject) + 2  # after "subject\n\n"
                 body_end = body_start + len(body)
                 det = policy_result.get("detected_entities", [])
+                encrypt_policy_types: List[str] = []
+                for ap in policy_result.get("applied_policies") or []:
+                    if ap.get("action") == "encrypt":
+                        encrypt_policy_types.extend(ap.get("entity_types") or [])
                 body_entities = [
                     e for e in det
-                    if e.get("encrypted_value") and e["start"] >= body_start and e["end"] <= body_end
+                    if entity_type_matches_policy(e.get("entity_type", ""), encrypt_policy_types)
+                    and e["start"] >= body_start
+                    and e["end"] <= body_end
                 ]
                 body_entities.sort(key=lambda x: x["start"], reverse=True)
                 encrypted_body = body
+                enc = self.policy_service.encryption
                 for e in body_entities:
                     start_rel = e["start"] - body_start
                     end_rel = e["end"] - body_start
-                    orig = e.get("original_value", e.get("value", ""))
-                    if encrypted_body[start_rel:end_rel] == orig:
-                        encrypted_body = encrypted_body[:start_rel] + e["encrypted_value"] + encrypted_body[end_rel:]
-                # Encrypt subject if any entity is in subject (subject is 0 to len(subject))
+                    if start_rel < 0 or end_rel > len(encrypted_body) or start_rel >= end_rel:
+                        continue
+                    span = encrypted_body[start_rel:end_rel]
+                    encrypted_body = (
+                        encrypted_body[:start_rel] + enc.encrypt(span) + encrypted_body[end_rel:]
+                    )
                 subject_entities = [
                     e for e in det
-                    if e.get("encrypted_value") and e["start"] < body_start and e["end"] <= body_start
+                    if entity_type_matches_policy(e.get("entity_type", ""), encrypt_policy_types)
+                    and e["start"] < len(subject)
+                    and e["end"] <= len(subject)
                 ]
                 if subject_entities:
                     subject_entities.sort(key=lambda x: x["start"], reverse=True)
                     encrypted_subject = subject
                     for e in subject_entities:
-                        if encrypted_subject[e["start"]:e["end"]] == e.get("original_value", e.get("value", "")):
-                            encrypted_subject = encrypted_subject[:e["start"]] + e["encrypted_value"] + encrypted_subject[e["end"]:]
+                        st, en = e["start"], e["end"]
+                        if st < 0 or en > len(encrypted_subject) or st >= en:
+                            continue
+                        span = encrypted_subject[st:en]
+                        encrypted_subject = encrypted_subject[:st] + enc.encrypt(span) + encrypted_subject[en:]
                 else:
                     encrypted_subject = subject
+
+            # Text extracts appended to full_text are encrypted in encrypted_text; parse back for UI
+            recipient_attachment_contents: Optional[List[dict]] = None
+            if action == "encrypt" and policy_result.get("encrypted_text") and attachment_contents:
+                recipient_attachment_contents = attachment_contents_from_encrypted_full_text(
+                    policy_result["encrypted_text"],
+                    attachment_contents,
+                )
+                if not recipient_attachment_contents:
+                    logger.warning(
+                        "Encrypt: could not parse [Attachment:] blocks from encrypted full text; "
+                        "attachment previews may still show plain extract"
+                    )
+
+            # Policy violation alert was created with plaintext body_preview; add recipient-side preview
+            if action == "encrypt" and policy_result.get("last_alert_id"):
+                try:
+                    from beanie import PydanticObjectId
+
+                    alert = await Alert.get(PydanticObjectId(policy_result["last_alert_id"]))
+                    if alert:
+                        ex = dict(alert.extra_data or {})
+                        if encrypted_body is not None:
+                            ex["recipient_body_preview"] = encrypted_body[:EMAIL_LOG_BODY_PREVIEW_MAX]
+                        if encrypted_subject is not None:
+                            ex["recipient_subject_preview"] = encrypted_subject
+                        if recipient_attachment_contents:
+                            ex["attachment_contents"] = recipient_attachment_contents
+                        ex["body_preview_note"] = (
+                            "Body and attachment text extracts (below) show encrypted tokens as for the recipient; "
+                            "entity list may still show original values for analysis."
+                        )
+                        alert.extra_data = ex
+                        await alert.save()
+                except Exception as alert_patch_err:
+                    logger.warning("Could not attach recipient preview to alert: %s", alert_patch_err)
             
             # Store detected entities only if policies matched
             if policy_result.get("policies_matched", False):
@@ -292,11 +482,20 @@ class EmailMonitoringService:
             if action != "block":
                 log_extra_data["body_preview"] = (
                     (encrypted_body[:EMAIL_LOG_BODY_PREVIEW_MAX] if encrypted_body else log_body_preview)
-                    if action == "encrypt" and encrypted_body
+                    if action == "encrypt" and encrypted_body is not None
                     else log_body_preview
                 )
-                if action == "encrypt" and encrypted_body:
-                    log_extra_data["encrypted_body"] = encrypted_body  # ما سيصل للمستلم
+                if action == "encrypt":
+                    if encrypted_body is not None:
+                        log_extra_data["encrypted_body"] = encrypted_body  # ما سيصل للمستلم
+                    if recipient_attachment_contents:
+                        log_extra_data["attachment_contents"] = recipient_attachment_contents
+                    if recipient_attachment_contents and attachment_files:
+                        merged_files = attachment_files_recipient_encrypted_text(
+                            attachment_files, recipient_attachment_contents
+                        )
+                        if merged_files is not None:
+                            log_extra_data["attachment_files"] = merged_files
                     # Store original body encrypted so recipient can decrypt (فك التشفير)
                     try:
                         log_extra_data["original_body_encrypted"] = self.policy_service.encryption.encrypt(body)

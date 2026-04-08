@@ -2123,11 +2123,106 @@ function showPolicyDetails(policyId, policyName, policyData) {
 }
 
 /**
- * Build HTML for a draggable card showing attachment/file names.
- * title defaults to 'Attachments'. attachmentContents optional: [{filename, content}] for email modal.
+ * Normalize attachment filename for matching (trim, collapse separators).
  */
-function buildAttachmentsCardHtml(fileNames, title, attachmentContents) {
+function normalizeAttachmentName(s) {
+    if (s == null) return '';
+    let t = String(s).trim().replace(/\\/g, '/');
+    try {
+        t = t.normalize('NFC');
+    } catch (e) {
+        /* ignore */
+    }
+    return t;
+}
+
+/**
+ * Find attachment_files[] entry by filename (exact, then basename match).
+ */
+function findAttachmentFileRecord(attachmentFiles, filename) {
+    const list = attachmentFiles || [];
+    const want = normalizeAttachmentName(filename);
+    if (!want) return null;
+    for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        if (!a || !a.filename) continue;
+        const n = normalizeAttachmentName(a.filename);
+        if (n === want) return { entry: a, index: i };
+    }
+    const baseWant = want.replace(/^.*\//, '');
+    for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        if (!a || !a.filename) continue;
+        const base = normalizeAttachmentName(a.filename).replace(/^.*\//, '');
+        if (base && base === baseWant) return { entry: a, index: i };
+    }
+    return null;
+}
+
+/**
+ * Download one attachment_files item (base64 → Blob → save). Prefer this over filename-only lookup.
+ */
+function downloadEmailAttachmentRecord(af, fallbackName) {
+    if (!af || !af.content_base64) {
+        if (typeof showNotification === 'function') {
+            showNotification('File not available for download.', 'warning');
+        }
+        return;
+    }
+    const mime = af.content_type || 'application/octet-stream';
+    const rawName = af.filename != null ? af.filename : fallbackName;
+    const safeName = String(rawName || 'download').replace(/[/\\?*:|"<>]/g, '_').trim() || 'download';
+    try {
+        const b64 = String(af.content_base64).replace(/\s/g, '');
+        const bin = atob(b64);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) {
+            arr[i] = bin.charCodeAt(i);
+        }
+        const blob = new Blob([arr], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = safeName;
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        console.error('downloadEmailAttachmentRecord', e);
+        if (typeof showNotification === 'function') {
+            showNotification('Download failed.', 'error');
+        }
+    }
+}
+
+/**
+ * Download original attachment bytes (from inbox log attachment_files).
+ * attachmentFiles: optional list; if omitted uses window.__emailAttachmentFilesCurrent.
+ */
+function downloadEmailAttachmentByFilename(filename, attachmentFiles) {
+    const list = attachmentFiles || (typeof window !== 'undefined' ? window.__emailAttachmentFilesCurrent : null) || [];
+    const found = findAttachmentFileRecord(list, filename);
+    if (!found || !found.entry) {
+        if (typeof showNotification === 'function') {
+            showNotification('File not available for download.', 'warning');
+        }
+        return;
+    }
+    downloadEmailAttachmentRecord(found.entry, filename);
+}
+
+/**
+ * Build HTML for a draggable card showing attachment/file names.
+ * attachmentContents: [{filename, content}] text extract preview.
+ * attachmentFiles: [{filename, content_type, content_base64}] optional originals for download.
+ */
+function buildAttachmentsCardHtml(fileNames, title, attachmentContents, attachmentFiles) {
     if (!fileNames || !fileNames.length) return '';
+    if (typeof window !== 'undefined') {
+        window.__emailAttachmentFilesCurrent = attachmentFiles || [];
+    }
     const cardTitle = title != null ? title : 'Attachments';
     const esc = (s) => {
         const d = document.createElement('div');
@@ -2137,18 +2232,65 @@ function buildAttachmentsCardHtml(fileNames, title, attachmentContents) {
     const contentByFile = Array.isArray(attachmentContents)
         ? Object.fromEntries(attachmentContents.map(a => [a.filename, a.content]))
         : {};
-    const listHtml = fileNames.map(name => {
+    const afList = Array.isArray(attachmentFiles) ? attachmentFiles : [];
+    const listHtml = fileNames.map((name) => {
         const content = contentByFile[name];
+        const found = findAttachmentFileRecord(afList, name);
+        const af = found ? found.entry : null;
+        const dlIdx = found ? found.index : -1;
+        let downloadBlock = '';
+        if (af && af.content_base64 && dlIdx >= 0) {
+            const dlHint = af.policy_encrypted_download
+                ? '· Encrypted text (as for recipient)'
+                : '· Original file';
+            const note = af.download_note
+                ? `<p class="attachment-download-note text-muted">${esc(af.download_note)}</p>`
+                : '';
+            downloadBlock = `<div class="attachment-download-row"><button type="button" class="btn btn-secondary btn-small js-email-attachment-download" data-dl-index="${dlIdx}" data-dl-filename="${encodeURIComponent(name)}">Download <span class="attachment-download-hint">${dlHint}</span></button>${note}</div>`;
+        } else if (af && af.omitted_reason === 'file_too_large') {
+            const sz = af.size_bytes != null ? af.size_bytes : '?';
+            downloadBlock = `<p class="attachment-too-large-hint text-muted">File too large to store (${sz} bytes).</p>`;
+        }
         const contentBlock = content != null && String(content).trim()
             ? `<pre class="attachment-card-content">${esc(content)}</pre>`
             : '';
-        return `<div class="attachment-card-item"><span class="attachment-card-filename">${esc(name)}</span>${contentBlock}</div>`;
+        const previewLabel = contentBlock ? '<span class="attachment-preview-label">Text extract (for analysis)</span>' : '';
+        return `<div class="attachment-card-item"><span class="attachment-card-filename">${esc(name)}</span>${downloadBlock}${previewLabel}${contentBlock}</div>`;
     }).join('');
     return `<div class="attachment-card-draggable" data-draggable-card>
         <div class="attachment-card-header" data-drag-handle><span class="attachment-card-title">${esc(cardTitle)}</span><span class="attachment-card-drag-hint" aria-hidden="true">&#8942;&#8942;</span></div>
         <div class="attachment-card-body">${listHtml}</div>
     </div>`;
 }
+
+// Capture phase: modal inner divs use onclick="event.stopPropagation()" so bubble never reaches document.
+document.addEventListener(
+    'click',
+    function (ev) {
+        const btn = ev.target.closest('.js-email-attachment-download');
+        if (!btn) return;
+        ev.preventDefault();
+        const list = (typeof window !== 'undefined' && window.__emailAttachmentFilesCurrent) || [];
+        const idxStr = btn.getAttribute('data-dl-index');
+        if (idxStr !== null && idxStr !== '') {
+            const idx = parseInt(idxStr, 10);
+            if (!Number.isNaN(idx) && list[idx] && list[idx].content_base64) {
+                downloadEmailAttachmentRecord(list[idx]);
+                return;
+            }
+        }
+        const enc = btn.getAttribute('data-dl-filename');
+        if (enc == null || enc === '') return;
+        let filename;
+        try {
+            filename = decodeURIComponent(enc);
+        } catch (e) {
+            filename = enc;
+        }
+        downloadEmailAttachmentByFilename(filename, list);
+    },
+    true
+);
 
 /** Initialize drag-to-move for attachment cards inside the given container */
 function initDraggableCards(container) {
@@ -2305,8 +2447,8 @@ function showAlertDetails(alertId, alertData) {
                         <h4>Source</h4>
                         <p class="detail-value">${sourceInfo}</p>
                     </div>
-                    ${(alert.attachment_names && alert.attachment_names.length) ? buildAttachmentsCardHtml(alert.attachment_names, 'Attachments', (alert.extra_data && alert.extra_data.attachment_contents) || []) : ''}
-                    ${(alert.extra_data && (alert.extra_data.body_preview || alert.extra_data.body)) ? `<div class="detail-section"><h4>Body</h4><pre class="attachment-card-content" style="margin:0;">${escapeHtml(alert.extra_data.body_preview || alert.extra_data.body)}</pre></div>` : ''}
+                    ${(alert.attachment_names && alert.attachment_names.length) ? buildAttachmentsCardHtml(alert.attachment_names, 'Attachments', (alert.extra_data && alert.extra_data.attachment_contents) || [], (alert.extra_data && alert.extra_data.attachment_files) || []) : ''}
+                    ${(alert.extra_data && (alert.extra_data.recipient_body_preview || alert.extra_data.body_preview || alert.extra_data.body)) ? `<div class="detail-section"><h4>${alert.extra_data.recipient_body_preview ? 'Body (encrypted for recipient)' : 'Body'}</h4>${alert.extra_data.body_preview_note ? `<p class="text-muted" style="font-size:0.85rem;margin:0 0 8px;">${escapeHtml(alert.extra_data.body_preview_note)}</p>` : ''}<pre class="attachment-card-content" style="margin:0;">${escapeHtml(alert.extra_data.recipient_body_preview || alert.extra_data.body_preview || alert.extra_data.body)}</pre></div>` : ''}
                     <div class="detail-section">
                         <h4>Detected Entities</h4>
                         <div class="entities-container ${!hasEntities ? 'entities-empty' : ''}">${entitiesHtml}</div>
@@ -2785,24 +2927,56 @@ function displayMonitoringUsers(users) {
 
 const USER_ACTIVITY_PAGE_SIZE = 20;
 
+/** Short metadata preview for the activity table; full record opens in Operation details (API fetch). */
+function previewMetadataForActivityTable(meta) {
+    if (meta == null || (typeof meta === 'object' && Object.keys(meta).length === 0)) return '—';
+    try {
+        const s = JSON.stringify(meta);
+        if (s.length <= 180) return s;
+        return s.slice(0, 180) + '…';
+    } catch (e) {
+        return '—';
+    }
+}
+
+/** Redact base64 payloads for on-screen audit JSON (same idea as backend sanitize). */
+function redactBinaryPayloadsForAuditDisplay(obj) {
+    if (obj == null) return obj;
+    if (Array.isArray(obj)) return obj.map(redactBinaryPayloadsForAuditDisplay);
+    if (typeof obj !== 'object') return obj;
+    const out = {};
+    for (const [k, v] of Object.entries(obj)) {
+        if (k === 'content_base64' && typeof v === 'string' && v.length > 0) {
+            out[k] = null;
+            out._binary_payload_redacted = true;
+            out._base64_char_length = v.length;
+        } else if (typeof v === 'object' && v !== null) {
+            out[k] = redactBinaryPayloadsForAuditDisplay(v);
+        } else {
+            out[k] = v;
+        }
+    }
+    return out;
+}
+
 function buildUserActivityTableRows(operations, escapeHtml) {
     if (!operations.length) {
         return '<tr><td colspan="7" class="text-muted">No operations found for this period.</td></tr>';
     }
     return operations.map((op, idx) => {
-        const metadata = op.metadata ? JSON.stringify(op.metadata, null, 2) : '';
+        const metadata = previewMetadataForActivityTable(op.metadata);
         const time = op.timestamp_server || (op.timestamp ? new Date(op.timestamp).toLocaleString() : 'N/A');
         const fileDisplay = op.file_name || (op.metadata && op.metadata.attachment_names && op.metadata.attachment_names.length ? op.metadata.attachment_names.join(', ') : 'N/A');
         const toRecipients = (op.metadata && op.metadata.to) ? (Array.isArray(op.metadata.to) ? op.metadata.to.join(', ') : String(op.metadata.to)) : '—';
         return `
-            <tr class="table-row-clickable" data-op-index="${idx}" title="Click to view operation details">
+            <tr class="table-row-clickable" data-op-index="${idx}" title="Click to view full operation audit">
                 <td>${escapeHtml(op.event_type || 'N/A')}</td>
                 <td>${escapeHtml(op.message || 'N/A')}</td>
                 <td>${escapeHtml(time)}</td>
                 <td>${escapeHtml(op.source_ip || 'N/A')}</td>
                 <td><span class="text-muted">${escapeHtml(toRecipients)}</span></td>
                 <td>${escapeHtml(fileDisplay)}</td>
-                <td><pre class="activity-metadata">${escapeHtml(metadata || '—')}</pre></td>
+                <td class="activity-metadata-preview"><span class="text-muted">${escapeHtml(metadata)}</span></td>
             </tr>
         `;
     }).join('');
@@ -2857,10 +3031,10 @@ async function loadUserActivityPage(userId, page) {
             paginationContainer.innerHTML = buildUserActivityPagination(data.pagination, userId);
         }
         modal.querySelectorAll('tr.table-row-clickable').forEach(tr => {
-            tr.onclick = function () {
+            tr.onclick = async function () {
                 const idx = parseInt(this.getAttribute('data-op-index'), 10);
                 if (!isNaN(idx) && window._lastUserActivityOperations && window._lastUserActivityOperations[idx]) {
-                    showOperationDetailsModal(window._lastUserActivityOperations[idx], window._lastUserActivityUser);
+                    await showOperationDetailsModal(window._lastUserActivityOperations[idx], window._lastUserActivityUser);
                 }
             };
         });
@@ -2927,7 +3101,7 @@ async function showUserActivityModal(userId) {
                                         <th>Source IP</th>
                                         <th>To</th>
                                         <th>File</th>
-                                        <th>Metadata</th>
+                                        <th>Metadata (preview)</th>
                                     </tr>
                                 </thead>
                                 <tbody>${operationsRows}</tbody>
@@ -2947,10 +3121,10 @@ async function showUserActivityModal(userId) {
         document.body.insertAdjacentHTML('beforeend', modalHtml);
 
         document.querySelectorAll('#userActivityModal tr.table-row-clickable').forEach(tr => {
-            tr.addEventListener('click', function () {
+            tr.addEventListener('click', async function () {
                 const idx = parseInt(this.getAttribute('data-op-index'), 10);
                 if (!isNaN(idx) && window._lastUserActivityOperations && window._lastUserActivityOperations[idx]) {
-                    showOperationDetailsModal(window._lastUserActivityOperations[idx], window._lastUserActivityUser);
+                    await showOperationDetailsModal(window._lastUserActivityOperations[idx], window._lastUserActivityUser);
                 }
             });
         });
@@ -2959,25 +3133,45 @@ async function showUserActivityModal(userId) {
     }
 }
 
-function showOperationDetailsModal(operation, userInfo) {
+async function showOperationDetailsModal(operation, userInfo) {
     if (!operation) return;
     const escapeHtml = (value) => {
         const div = document.createElement('div');
         div.textContent = value == null ? '' : String(value);
         return div.innerHTML;
     };
-    const meta = operation.metadata || {};
-    const policyNames = operation.policy_names || [];
+    let op = { ...operation };
+    if (operation.id) {
+        try {
+            const r = await fetch(
+                `/api/monitoring/operations/${encodeURIComponent(operation.id)}?include_binary_attachment_payloads=true`,
+                { headers: getAuthHeaders() }
+            );
+            if (r.ok) {
+                const data = await r.json();
+                op = {
+                    ...operation,
+                    ...data,
+                    metadata: data.metadata != null ? data.metadata : (operation.metadata || {}),
+                    policy_names: data.policy_names != null ? data.policy_names : (operation.policy_names || []),
+                };
+            }
+        } catch (e) {
+            console.warn('Full operation audit fetch failed', e);
+        }
+    }
+    const meta = op.metadata || {};
+    const policyNames = op.policy_names || operation.policy_names || [];
     const hasPolicyViolation = policyNames.length > 0;
     const blocked = meta.blocked === true;
     const entityCount = meta.detected_entities_count != null ? meta.detected_entities_count : 0;
     const entityTypes = meta.detected_entity_types || [];
-    const sourceUser = operation.source_user || userInfo.username || userInfo.email || 'N/A';
-    const sourceInfo = sourceUser + (operation.source_ip ? ' @ ' + operation.source_ip : '');
-    const formattedDate = operation.timestamp_server || (operation.timestamp
+    const sourceUser = op.source_user || operation.source_user || (userInfo && userInfo.username) || (userInfo && userInfo.email) || 'N/A';
+    const sourceInfo = sourceUser + ((op.source_ip || operation.source_ip) ? ' @ ' + (op.source_ip || operation.source_ip) : '');
+    const formattedDate = op.timestamp_server || operation.timestamp_server || (op.created_at_server) || (operation.timestamp
         ? new Date(operation.timestamp).toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-        : 'N/A');
-    const title = (operation.event_type || 'Operation').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        : (op.created_at ? new Date(op.created_at).toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A'));
+    const title = (op.event_type || operation.event_type || 'Operation').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const actionTaken = blocked ? 'Blocked' : (hasPolicyViolation ? 'Policy applied' : 'Logged');
     const actionClass = blocked ? 'danger' : hasPolicyViolation ? 'warning' : 'info';
     let entitiesHtml = '';
@@ -2996,16 +3190,18 @@ function showOperationDetailsModal(operation, userInfo) {
             <p class="detail-value">${policyNames.map(p => escapeHtml(p)).join(', ')}</p>
           </div>`
         : (meta.policies_applied === 0 ? '<div class="detail-section"><h4>Policy</h4><p class="text-muted">No matching policy (entities detected but no policy matched)</p></div>' : '');
-    const fileSection = operation.file_name
-        ? buildAttachmentsCardHtml([operation.file_name + (operation.file_size ? ' (' + operation.file_size + ' bytes)' : '')], 'File')
+    const auditJson = JSON.stringify(redactBinaryPayloadsForAuditDisplay(meta), null, 2);
+    const fileSection = (op.file_name || operation.file_name)
+        ? buildAttachmentsCardHtml([(op.file_name || operation.file_name) + ((op.file_size != null || operation.file_size != null) ? ' (' + (op.file_size != null ? op.file_size : operation.file_size) + ' bytes)' : '')], 'File')
         : '';
     const attachmentNames = meta.attachment_names || [];
     const attachmentContents = meta.attachment_contents || [];
+    const attachmentFilesList = meta.attachment_files || [];
     const attachmentSection = attachmentNames.length
-        ? buildAttachmentsCardHtml(attachmentNames, 'Attachments', attachmentContents)
+        ? buildAttachmentsCardHtml(attachmentNames, 'Attachments', attachmentContents, attachmentFilesList)
         : '';
-    const networkSection = operation.network_destination
-        ? `<div class="detail-section"><h4>Network</h4><p class="detail-value">${escapeHtml(operation.network_destination)}${operation.network_protocol ? ' (' + operation.network_protocol + ')' : ''}</p></div>`
+    const networkSection = (op.network_destination || operation.network_destination)
+        ? `<div class="detail-section"><h4>Network</h4><p class="detail-value">${escapeHtml(op.network_destination || operation.network_destination)}${(op.network_protocol || operation.network_protocol) ? ' (' + (op.network_protocol || operation.network_protocol) + ')' : ''}</p></div>`
         : '';
     const modalHtml = `
         <div class="modal-overlay show" id="operationDetailsModal" onclick="closeDetailsModal(event)">
@@ -3034,7 +3230,7 @@ function showOperationDetailsModal(operation, userInfo) {
                 <div class="alert-details-section">
                     <div class="detail-section">
                         <h4>Description</h4>
-                        <p class="detail-value">${escapeHtml(operation.message || 'N/A')}</p>
+                        <p class="detail-value">${escapeHtml(op.message || operation.message || 'N/A')}</p>
                     </div>
                     <div class="detail-section">
                         <h4>Source</h4>
@@ -3048,6 +3244,12 @@ function showOperationDetailsModal(operation, userInfo) {
                     ${fileSection}
                     ${attachmentSection}
                     ${networkSection}
+                    <div class="detail-section operation-full-audit-section">
+                        <details class="operation-full-audit-details">
+                            <summary>Full audit record (binary payloads redacted in this view)</summary>
+                            <pre class="operation-audit-pre">${escapeHtml(auditJson)}</pre>
+                        </details>
+                    </div>
                     <div class="detail-section">
                         <h4>Created At</h4>
                         <p class="detail-value">${formattedDate}</p>
@@ -3294,10 +3496,10 @@ async function loadEmailList(page) {
         }
         container.innerHTML = html;
         container.querySelectorAll('tr.table-row-clickable').forEach(tr => {
-            tr.addEventListener('click', function () {
+            tr.addEventListener('click', async function () {
                 const logId = this.getAttribute('data-log-id');
                 const log = logs.find(l => String(l.id) === logId);
-                if (log) showEmailDetailModal(log);
+                if (log) await showEmailDetailModal(log);
             });
         });
     } catch (e) {
@@ -3459,9 +3661,24 @@ function buildEmailAnalysisSectionHtml(ed, escapeHtml, opts) {
     );
 }
 
-function showEmailDetailModal(log) {
+async function showEmailDetailModal(log) {
     if (!log) return;
-    const ed = log.email_data || log.extra_data || {};
+    let ed = log.email_data || log.extra_data || {};
+    if (log.id) {
+        try {
+            const r = await fetch(`/api/monitoring/email/log/${encodeURIComponent(log.id)}`, {
+                headers: getAuthHeaders(),
+            });
+            if (r.ok) {
+                const data = await r.json();
+                if (data && data.email_data && typeof data.email_data === 'object') {
+                    ed = data.email_data;
+                }
+            }
+        } catch (e) {
+            console.warn('Email log detail fetch failed', e);
+        }
+    }
     if (!ed || (typeof ed === 'object' && !Object.keys(ed).length)) return;
     const escapeHtml = (v) => {
         const d = document.createElement('div');
@@ -3474,8 +3691,9 @@ function showEmailDetailModal(log) {
     const date = formatAlertTimeLocal(log.created_at, log.created_at_server || '—');
     const attachmentNames = ed.attachment_names || [];
     const attachmentContents = ed.attachment_contents || [];
+    const attachmentFilesList = ed.attachment_files || [];
     const attachmentsHtml = attachmentNames.length
-        ? buildAttachmentsCardHtml(attachmentNames, 'Attachments', attachmentContents)
+        ? buildAttachmentsCardHtml(attachmentNames, 'Attachments', attachmentContents, attachmentFilesList)
         : '<p class="text-muted">None</p>';
     const bodyPreview = ed.encrypted_body != null ? ed.encrypted_body : ed.body_preview;
     const bodyLabel = ed.encrypted_body != null ? 'Body (encrypted)' : 'Body';
@@ -3856,6 +4074,8 @@ async function testEmail(event) {
 // Authentication functions
 let currentUser = null;
 let authToken = null;
+/** Short-lived JWT after password OK when 2FA is enabled (not persisted). */
+let pendingMfaToken = null;
 
 // Load user from localStorage on page load
 function loadStoredAuth() {
@@ -3867,6 +4087,9 @@ function loadStoredAuth() {
         try {
             authToken = storedToken;
             currentUser = JSON.parse(storedUser);
+            if (currentUser && typeof currentUser.totp_enabled !== 'boolean') {
+                currentUser.totp_enabled = false;
+            }
             console.log('Auth loaded successfully:', { 
                 hasToken: !!authToken, 
                 username: currentUser?.username,
@@ -4169,7 +4392,7 @@ async function handleLogin(event) {
 
     try {
         console.log('Attempting login with:', { username, password: '***' });
-        const response = await fetch('/api/auth/login', {
+        const response = await fetch(API_BASE + '/api/auth/login', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -4186,7 +4409,69 @@ async function handleLogin(event) {
             console.log('Response data:', data);
             if (!response.ok) {
                 console.error('Login failed:', data);
-                throw new Error(data.detail || 'Login failed');
+                const detail = data.detail;
+                let errMsg = 'Login failed';
+                if (typeof detail === 'string') {
+                    errMsg = detail;
+                } else if (Array.isArray(detail)) {
+                    errMsg = detail.map(function (e) { return e.msg || JSON.stringify(e); }).join(' ');
+                } else if (detail != null) {
+                    errMsg = String(detail);
+                }
+                if (response.status === 429) {
+                    var retryAfter = parseInt(response.headers.get('Retry-After'), 10);
+                    if (isNaN(retryAfter) || retryAfter <= 0) {
+                        var secMatch = typeof errMsg === 'string' && errMsg.match(/(\d+)\s*second/i);
+                        if (secMatch) {
+                            retryAfter = parseInt(secMatch[1], 10);
+                        }
+                    }
+                    var lockoutMsg = errMsg;
+                    if (!isNaN(retryAfter) && retryAfter > 0) {
+                        var mins = Math.floor(retryAfter / 60);
+                        var remSecs = retryAfter % 60;
+                        if (mins > 0) {
+                            lockoutMsg = 'Too many login attempts. Time remaining: ' + mins + ' minute' + (mins === 1 ? '' : 's');
+                            if (remSecs > 0) {
+                                lockoutMsg += ' and ' + remSecs + ' second' + (remSecs === 1 ? '' : 's');
+                            }
+                            lockoutMsg += '.';
+                        } else {
+                            lockoutMsg = 'Too many login attempts. Time remaining: ' + retryAfter + ' second' + (retryAfter === 1 ? '' : 's') + '.';
+                        }
+                    }
+                    showNotification(lockoutMsg, 'error');
+                    const modalContent = document.querySelector('#loginModal .modal-content');
+                    if (modalContent) {
+                        modalContent.classList.remove('shake');
+                        void modalContent.offsetWidth;
+                        modalContent.classList.add('shake');
+                    }
+                    return;
+                }
+                throw new Error(errMsg);
+            }
+
+            if (data.mfa_required && data.mfa_token) {
+                pendingMfaToken = data.mfa_token;
+                const pStep = document.getElementById('loginPasswordStep');
+                const mStep = document.getElementById('loginMfaStep');
+                const title = document.getElementById('loginModalTitle');
+                const sub = document.getElementById('loginModalSubtitle');
+                if (pStep) pStep.style.display = 'none';
+                if (mStep) mStep.style.display = '';
+                if (title) title.textContent = 'Two-factor authentication';
+                if (sub) sub.textContent = 'Enter the 6-digit code from Google Authenticator';
+                setTimeout(function () {
+                    var el = document.getElementById('loginMfaCode');
+                    if (el) el.focus();
+                }, 100);
+                showNotification('Enter your authenticator code to continue.', 'info');
+                return;
+            }
+
+            if (!data.access_token || !data.user) {
+                throw new Error('Unexpected login response');
             }
 
             authToken = data.access_token;
@@ -4194,7 +4479,8 @@ async function handleLogin(event) {
                 id: data.user.id,
                 username: data.user.username,
                 email: data.user.email,
-                role: data.user.role
+                role: data.user.role,
+                totp_enabled: !!data.user.totp_enabled
             };
 
             // Store in localStorage
@@ -4253,6 +4539,97 @@ async function handleLogin(event) {
     }
 }
 
+function resetLoginMfaStep() {
+    pendingMfaToken = null;
+    var pStep = document.getElementById('loginPasswordStep');
+    var mStep = document.getElementById('loginMfaStep');
+    var title = document.getElementById('loginModalTitle');
+    var sub = document.getElementById('loginModalSubtitle');
+    if (pStep) pStep.style.display = '';
+    if (mStep) mStep.style.display = 'none';
+    if (title) title.textContent = 'Login';
+    if (sub) sub.textContent = 'Enter your credentials to continue';
+    var mfaInput = document.getElementById('loginMfaCode');
+    if (mfaInput) mfaInput.value = '';
+}
+
+async function handleMfaVerify(event) {
+    event.preventDefault();
+    if (!pendingMfaToken) {
+        showNotification('Session expired. Please sign in again.', 'warning');
+        resetLoginMfaStep();
+        return;
+    }
+    var codeEl = document.getElementById('loginMfaCode');
+    var code = codeEl ? codeEl.value : '';
+    var submitBtn = event.target.querySelector('button[type="submit"]');
+    var originalBtnContent = submitBtn.innerHTML;
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="spinner"></span> Verifying...';
+    try {
+        var response = await fetch(API_BASE + '/api/auth/mfa/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mfa_token: pendingMfaToken, code: String(code).replace(/\s/g, '') })
+        });
+        var data = await response.json().catch(function () { return {}; });
+        if (!response.ok) {
+            var detail = data.detail;
+            var errMsg = 'Verification failed';
+            if (typeof detail === 'string') errMsg = detail;
+            else if (response.status === 429) errMsg = 'Too many attempts. Try again later.';
+            if (response.status === 429) {
+                var ra = response.headers.get('Retry-After');
+                if (ra && !isNaN(parseInt(ra, 10))) {
+                    errMsg = 'Too many attempts. Try again in ' + ra + ' second(s).';
+                }
+            }
+            throw new Error(errMsg);
+        }
+        pendingMfaToken = null;
+        authToken = data.access_token;
+        currentUser = {
+            id: data.user.id,
+            username: data.user.username,
+            email: data.user.email,
+            role: data.user.role,
+            totp_enabled: !!data.user.totp_enabled
+        };
+        safeStorage.setItem('authToken', authToken);
+        safeStorage.setItem('currentUser', JSON.stringify(currentUser));
+        updateAuthUI();
+        resetLoginMfaStep();
+        closeLoginModal();
+        showNotification('Welcome back, ' + currentUser.username + '!', 'success');
+        setTimeout(function () {
+            updateAuthUI();
+            var defaultTabBtn = document.querySelector('.tab-btn[onclick*="analysis"]');
+            if (defaultTabBtn) showTab('analysis', defaultTabBtn);
+        }, 150);
+        if (currentUser.role === 'admin') {
+            setTimeout(function () {
+                if (typeof loadPolicies === 'function') loadPolicies();
+                if (typeof loadAlerts === 'function') loadAlerts();
+                if (typeof loadMonitoringData === 'function') loadMonitoringData();
+            }, 500);
+        }
+        var loginOverlay = document.getElementById('loginRequiredOverlay');
+        if (loginOverlay) loginOverlay.style.display = 'none';
+    } catch (error) {
+        console.error('MFA verify error:', error);
+        showNotification(error.message, 'error');
+        var modalContent = document.querySelector('#loginModal .modal-content');
+        if (modalContent) {
+            modalContent.classList.remove('shake');
+            void modalContent.offsetWidth;
+            modalContent.classList.add('shake');
+        }
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalBtnContent;
+    }
+}
+
 // Register
 async function handleRegister(event) {
     event.preventDefault();
@@ -4283,7 +4660,7 @@ async function handleRegister(event) {
     submitBtn.innerHTML = '<span class="spinner"></span> Creating Account...';
 
     try {
-        const response = await fetch('/api/auth/register', {
+        const response = await fetch(API_BASE + '/api/auth/register', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -4345,6 +4722,7 @@ async function logout() {
     if (typeof stopAdminNotificationPolling === 'function') stopAdminNotificationPolling();
     authToken = null;
     currentUser = null;
+    pendingMfaToken = null;
     safeStorage.removeItem('authToken');
     safeStorage.removeItem('currentUser');
 
@@ -4363,6 +4741,7 @@ async function logout() {
 // Modal functions
 function showLoginModal() {
     console.log('showLoginModal called');
+    resetLoginMfaStep();
     const modal = document.getElementById('loginModal');
     if (modal) {
         // Hide the login overlay first
@@ -4408,6 +4787,7 @@ function closeLoginModal() {
         modal.classList.remove('show');
         setTimeout(() => {
             modal.style.display = 'none';
+            resetLoginMfaStep();
             const form = document.getElementById('loginForm');
             if (form) form.reset();
             // Show login overlay again if user is not logged in
@@ -4418,6 +4798,174 @@ function closeLoginModal() {
                 }
             }
         }, 300);
+    }
+}
+
+function refreshSecurity2faModalLayout() {
+    var totp = currentUser && currentUser.totp_enabled;
+    var enroll = document.getElementById('security2faEnrollSection');
+    var dis = document.getElementById('security2faDisableSection');
+    var status = document.getElementById('security2faStatusLine');
+    var qrWrap = document.getElementById('security2faQrWrap');
+    var beginBtn = document.getElementById('security2faBeginBtn');
+    if (!enroll || !dis) return;
+    if (totp) {
+        enroll.style.display = 'none';
+        dis.style.display = '';
+        if (status) status.textContent = 'Two-factor authentication is enabled for your account.';
+    } else {
+        enroll.style.display = '';
+        dis.style.display = 'none';
+        if (status) status.textContent = 'Two-factor authentication is not enabled yet.';
+        if (qrWrap) qrWrap.style.display = 'none';
+        if (beginBtn) beginBtn.style.display = '';
+    }
+}
+
+async function showSecurity2faModal() {
+    if (!authToken) {
+        showNotification('Please log in first.', 'warning');
+        return;
+    }
+    try {
+        var r = await fetch(API_BASE + '/api/auth/me', { headers: getAuthHeaders() });
+        var u = await r.json();
+        if (!r.ok) {
+            if (r.status === 401 || r.status === 403) {
+                showNotification('Session expired. Please log in again.', 'warning');
+                if (typeof logout === 'function') logout();
+            }
+            return;
+        }
+        currentUser.totp_enabled = !!u.totp_enabled;
+        safeStorage.setItem('currentUser', JSON.stringify(currentUser));
+        refreshSecurity2faModalLayout();
+        var m = document.getElementById('security2faModal');
+        if (m) {
+            m.style.display = 'flex';
+            m.style.zIndex = '100002';
+            m.style.position = 'fixed';
+            m.style.left = '0';
+            m.style.top = '0';
+            m.style.width = '100vw';
+            m.style.height = '100vh';
+            m.classList.add('show');
+        }
+    } catch (e) {
+        console.error(e);
+        showNotification('Could not load security settings.', 'error');
+    }
+}
+
+function closeSecurity2faModal() {
+    var m = document.getElementById('security2faModal');
+    if (m) {
+        m.style.display = 'none';
+        m.classList.remove('show');
+    }
+    var qrWrap = document.getElementById('security2faQrWrap');
+    if (qrWrap) qrWrap.style.display = 'none';
+}
+
+function security2faCopySecret() {
+    var el = document.getElementById('security2faSecretText');
+    if (!el || !el.textContent || !String(el.textContent).trim()) {
+        if (typeof showNotification === 'function') {
+            showNotification('Nothing to copy yet. Run Begin setup first.', 'warning');
+        }
+        return;
+    }
+    var text = String(el.textContent).trim();
+    function done(ok) {
+        if (typeof showNotification === 'function') {
+            showNotification(ok ? 'Secret copied to clipboard.' : 'Could not copy. Select and copy manually.', ok ? 'success' : 'error');
+        }
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { done(true); }).catch(function () { done(false); });
+    } else {
+        done(false);
+    }
+}
+
+async function security2faBeginSetup() {
+    var btn = document.getElementById('security2faBeginBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
+    try {
+        var r = await fetch(API_BASE + '/api/auth/mfa/setup/start', {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+        var data = await r.json();
+        if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Setup failed');
+        var qrWrap = document.getElementById('security2faQrWrap');
+        var img = document.getElementById('security2faQrImg');
+        var sec = document.getElementById('security2faSecretText');
+        if (img && data.qr_code_png_base64) img.src = 'data:image/png;base64,' + data.qr_code_png_base64;
+        if (sec) sec.textContent = data.secret_base32 || '';
+        if (qrWrap) qrWrap.style.display = '';
+        showNotification('Scan the QR with Google Authenticator, then enter the code below.', 'info');
+    } catch (e) {
+        showNotification(e.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Begin setup'; }
+    }
+}
+
+async function security2faConfirmSetup() {
+    var codeEl = document.getElementById('security2faConfirmCode');
+    var code = codeEl ? String(codeEl.value).replace(/\s/g, '') : '';
+    if (code.length < 6) {
+        showNotification('Enter the 6-digit code from Google Authenticator.', 'warning');
+        return;
+    }
+    try {
+        var r = await fetch(API_BASE + '/api/auth/mfa/setup/confirm', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ code: code })
+        });
+        var data = await r.json();
+        if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Confirmation failed');
+        currentUser.totp_enabled = true;
+        safeStorage.setItem('currentUser', JSON.stringify(currentUser));
+        refreshSecurity2faModalLayout();
+        if (codeEl) codeEl.value = '';
+        showNotification('Two-factor authentication is now enabled.', 'success');
+    } catch (e) {
+        showNotification(e.message, 'error');
+    }
+}
+
+async function security2faDisable() {
+    var pw = document.getElementById('security2faDisablePassword');
+    var cd = document.getElementById('security2faDisableCode');
+    var password = pw ? pw.value : '';
+    var code = cd ? String(cd.value).replace(/\s/g, '') : '';
+    if (!password) {
+        showNotification('Enter your password.', 'warning');
+        return;
+    }
+    if (code.length < 6) {
+        showNotification('Enter the code from Google Authenticator.', 'warning');
+        return;
+    }
+    try {
+        var r = await fetch(API_BASE + '/api/auth/mfa/disable', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ password: password, code: code })
+        });
+        var data = await r.json();
+        if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not disable 2FA');
+        currentUser.totp_enabled = false;
+        safeStorage.setItem('currentUser', JSON.stringify(currentUser));
+        if (pw) pw.value = '';
+        if (cd) cd.value = '';
+        refreshSecurity2faModalLayout();
+        showNotification('Two-factor authentication has been disabled.', 'success');
+    } catch (e) {
+        showNotification(e.message, 'error');
     }
 }
 
@@ -4662,8 +5210,8 @@ function showAlertDialog(alert) {
                     <h4>Source</h4>
                     <p class="detail-value">${escapeHtml(clientName)}</p>
                 </div>
-                ${(alert.attachment_names && alert.attachment_names.length) ? buildAttachmentsCardHtml(alert.attachment_names, 'Attachments', (alert.extra_data && alert.extra_data.attachment_contents) || []) : ''}
-                ${(alert.extra_data && (alert.extra_data.body_preview || alert.extra_data.body)) ? `<div class="detail-section"><h4>Body</h4><pre class="attachment-card-content" style="margin:0;">${escapeHtml(alert.extra_data.body_preview || alert.extra_data.body)}</pre></div>` : ''}
+                ${(alert.attachment_names && alert.attachment_names.length) ? buildAttachmentsCardHtml(alert.attachment_names, 'Attachments', (alert.extra_data && alert.extra_data.attachment_contents) || [], (alert.extra_data && alert.extra_data.attachment_files) || []) : ''}
+                ${(alert.extra_data && (alert.extra_data.recipient_body_preview || alert.extra_data.body_preview || alert.extra_data.body)) ? `<div class="detail-section"><h4>${alert.extra_data.recipient_body_preview ? 'Body (encrypted for recipient)' : 'Body'}</h4>${alert.extra_data.body_preview_note ? `<p class="text-muted" style="font-size:0.85rem;margin:0 0 8px;">${escapeHtml(alert.extra_data.body_preview_note)}</p>` : ''}<pre class="attachment-card-content" style="margin:0;">${escapeHtml(alert.extra_data.recipient_body_preview || alert.extra_data.body_preview || alert.extra_data.body)}</pre></div>` : ''}
                 ${desc ? `<div class="detail-section"><h4>Description</h4><p class="detail-value">${escapeHtml(desc)}</p></div>` : ''}
                 <div class="detail-section">
                     <h4>Detected Entities</h4>
@@ -5017,6 +5565,13 @@ function displayUsers(users) {
                                 </button>
                             `}
                         ` : ''}
+                        ${(typeof currentUser !== 'undefined' && currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager')) ? `
+                        <button type="button" class="btn-icon btn-ghost" onclick="event.stopPropagation(); openUserPolicyAssignmentsModal('${user.id}')" title="Policy assignments">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                            </svg>
+                        </button>
+                        ` : ''}
                         <button class="btn-icon btn-ghost" onclick="event.stopPropagation(); openEditUserModal('${user.id}')" title="Edit User">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -5144,6 +5699,127 @@ function closeEditUserModal() {
         modal.classList.remove('show');
         modal.style.display = 'none';
         modal.setAttribute('aria-hidden', 'true');
+    }
+}
+
+function _escapePolicyAssignHtml(s) {
+    if (s == null || s === undefined) return '';
+    const d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+}
+
+function closeUserPolicyAssignmentsModal() {
+    const modal = document.getElementById('userPolicyAssignmentsModal');
+    if (modal) {
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+        modal.setAttribute('aria-hidden', 'true');
+    }
+}
+
+async function openUserPolicyAssignmentsModal(userId) {
+    if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'manager')) {
+        showNotification('Admin or manager access required', 'error');
+        return;
+    }
+    const modal = document.getElementById('userPolicyAssignmentsModal');
+    const listEl = document.getElementById('userPolicyAssignmentsList');
+    const hintEl = document.getElementById('userPolicyAssignmentsHint');
+    const subEl = document.getElementById('userPolicyAssignmentsSubtitle');
+    document.getElementById('userPolicyAssignmentsUserId').value = userId;
+    if (listEl) listEl.innerHTML = '<p class="text-muted" style="padding:12px;">Loading policies…</p>';
+    if (hintEl) hintEl.style.display = 'none';
+    if (modal) {
+        modal.classList.add('show');
+        modal.style.setProperty('display', 'flex', 'important');
+        modal.setAttribute('aria-hidden', 'false');
+    }
+    try {
+        const res = await fetch(`/api/users/${userId}/policy-assignments`, { headers: getAuthHeaders() });
+        if (res.status === 401 || res.status === 403) {
+            closeUserPolicyAssignmentsModal();
+            logout();
+            return;
+        }
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            closeUserPolicyAssignmentsModal();
+            showNotification(err.detail || 'Failed to load policy assignments', 'error');
+            return;
+        }
+        const data = await res.json();
+        if (subEl) {
+            subEl.textContent = 'User: ' + (data.username || userId) + ' — select which policies apply.';
+        }
+        if (hintEl) {
+            hintEl.style.display = data.assigned_policy_ids == null ? 'block' : 'none';
+        }
+        const policies = data.policies || [];
+        if (!policies.length) {
+            listEl.innerHTML = '<p class="text-muted" style="padding:12px;">No policies defined yet.</p>';
+            return;
+        }
+        let html = '';
+        policies.forEach(function (p) {
+            const checked = data.assigned_policy_ids == null
+                ? true
+                : (data.assigned_policy_ids.indexOf(p.id) !== -1);
+            const idAttr = 'policy_cb_' + String(p.id).replace(/[^a-zA-Z0-9_-]/g, '_');
+            const disabledClass = p.enabled ? '' : ' policy-assignment-row-disabled';
+            html += '<div class="policy-assignment-row' + disabledClass + '">' +
+                '<span class="policy-assignment-row__check">' +
+                '<input type="checkbox" id="' + idAttr + '" data-policy-id="' + String(p.id).replace(/"/g, '') + '" ' + (checked ? 'checked ' : '') + '/>' +
+                '</span>' +
+                '<label for="' + idAttr + '" dir="auto">' + _escapePolicyAssignHtml(p.name) +
+                '<span class="policy-assignment-meta">' + _escapePolicyAssignHtml(p.action) +
+                (p.enabled ? '' : ' · disabled globally') + '</span></label></div>';
+        });
+        listEl.innerHTML = html;
+    } catch (e) {
+        closeUserPolicyAssignmentsModal();
+        showNotification('Error: ' + (e.message || 'Unknown'), 'error');
+    }
+}
+
+async function saveUserPolicyAssignments(ev) {
+    if (ev && ev.preventDefault) ev.preventDefault();
+    const userId = document.getElementById('userPolicyAssignmentsUserId').value;
+    const listEl = document.getElementById('userPolicyAssignmentsList');
+    const btn = document.getElementById('userPolicyAssignmentsSaveBtn');
+    if (!userId || !listEl) return;
+    const ids = [];
+    listEl.querySelectorAll('input[type="checkbox"][data-policy-id]').forEach(function (cb) {
+        if (cb.checked) ids.push(cb.getAttribute('data-policy-id'));
+    });
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Saving…';
+    }
+    try {
+        const res = await fetch(`/api/users/${userId}/policy-assignments`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({ policy_ids: ids })
+        });
+        if (res.status === 401 || res.status === 403) {
+            logout();
+            return;
+        }
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || res.statusText || 'Save failed');
+        }
+        closeUserPolicyAssignmentsModal();
+        showNotification('Policy assignments saved', 'success');
+    } catch (e) {
+        showNotification(e.message || 'Error saving assignments', 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = orig || 'Save';
+        }
     }
 }
 
@@ -5394,6 +6070,8 @@ window.togglePolicy = togglePolicy;
 window.updatePolicy = updatePolicy;
 window.resetPolicyForm = resetPolicyForm;
 window.showNotification = showNotification;
+window.downloadEmailAttachmentByFilename = downloadEmailAttachmentByFilename;
+window.downloadEmailAttachmentRecord = downloadEmailAttachmentRecord;
 
 // Function to update selected entities tags display
 function updateSelectedEntitiesTags() {

@@ -1,0 +1,222 @@
+<mxfile host="app.diagrams.net" modified="2026-04-03T00:00:00.000Z" agent="Integrated_Data_Protection_System" version="22.1.0" type="device">
+  <diagram id="use-case" name="Use Case — حالات الاستخدام">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="980" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="sys-boundary" value="&lt;b&gt;Secure DLP — نظام حماية البيانات المتكامل&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;Integrated Data Protection System&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;align=center;verticalAlign=top;fillColor=#f8fafc;strokeColor=#64748b;strokeWidth=2;dashed=1;spacingTop=8;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1600" height="900" as="geometry" />
+        </mxCell>
+        <mxCell id="zone-lbl-user" value="&lt;b&gt;حالات المستخدم&lt;/b&gt; — User-facing" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;fontColor=#1d4ed8;" vertex="1" parent="1">
+          <mxGeometry x="200" y="52" width="320" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="zone-lbl-admin" value="&lt;b&gt;حالات الإدارة&lt;/b&gt; — Administration" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=11;fontColor=#b45309;" vertex="1" parent="1">
+          <mxGeometry x="200" y="492" width="320" height="22" as="geometry" />
+        </mxCell>
+
+        <mxCell id="actor-user" value="المستخدم&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;User&lt;/font&gt;" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#1e293b;strokeColor=#0f172a;" vertex="1" parent="1">
+          <mxGeometry x="72" y="168" width="36" height="72" as="geometry" />
+        </mxCell>
+        <mxCell id="actor-mgr" value="مدير القسم&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;Department Manager&lt;/font&gt;" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#334155;strokeColor=#0f172a;" vertex="1" parent="1">
+          <mxGeometry x="72" y="288" width="36" height="72" as="geometry" />
+        </mxCell>
+        <mxCell id="actor-admin" value="مدير النظام&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;System Administrator&lt;/font&gt;" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#1e293b;strokeColor=#0f172a;" vertex="1" parent="1">
+          <mxGeometry x="72" y="628" width="36" height="72" as="geometry" />
+        </mxCell>
+
+        <mxCell id="uc-login" value="تسجيل الدخول&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Login&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#e0f2fe;strokeColor=#0369a1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="72" width="140" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="uc-create" value="إنشاء حساب&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Create Account&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#e0f2fe;strokeColor=#0369a1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="152" width="140" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="uc-text" value="تحليل النصوص&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Text Analysis&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#e0f2fe;strokeColor=#0369a1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="232" width="140" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="uc-file" value="تحليل الملفات&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;File Analysis&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#e0f2fe;strokeColor=#0369a1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="312" width="140" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="uc-email" value="فحص البريد&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Test Email&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#e0f2fe;strokeColor=#0369a1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="392" width="140" height="64" as="geometry" />
+        </mxCell>
+
+        <mxCell id="uc-inbox" value="صندوق البريد&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Email Inbox&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#e0f2fe;strokeColor=#0369a1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="472" width="140" height="64" as="geometry" />
+        </mxCell>
+
+        <mxCell id="uc-verify" value="التحقق&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Verification&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#f1f5f9;strokeColor=#475569;fontSize=10;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="520" y="78" width="120" height="52" as="geometry" />
+        </mxCell>
+        <mxCell id="uc-acct-detail" value="تفاصيل إنشاء الحساب&lt;br&gt;&lt;font style=&quot;font-size:8px&quot;&gt;Account creation details&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#f1f5f9;strokeColor=#475569;fontSize=10;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="500" y="158" width="160" height="56" as="geometry" />
+        </mxCell>
+
+        <mxCell id="uc-users" value="إدارة المستخدمين&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;User Management&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#fef3c7;strokeColor=#b45309;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="860" y="540" width="160" height="68" as="geometry" />
+        </mxCell>
+        <mxCell id="uc-dept" value="إدارة الأقسام&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Department Management&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#fef3c7;strokeColor=#b45309;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="860" y="632" width="160" height="68" as="geometry" />
+        </mxCell>
+        <mxCell id="uc-policy" value="إدارة السياسات&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Policy Management&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#fef3c7;strokeColor=#b45309;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="860" y="724" width="160" height="68" as="geometry" />
+        </mxCell>
+        <mxCell id="uc-alerts" value="إدارة التنبيهات&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Alerts Management&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#fef3c7;strokeColor=#b45309;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="860" y="816" width="160" height="68" as="geometry" />
+        </mxCell>
+
+        <mxCell id="uc-monitor" value="المراقبة والتقارير&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Monitoring &amp; Reports&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#fef3c7;strokeColor=#b45309;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="540" width="160" height="68" as="geometry" />
+        </mxCell>
+        <mxCell id="uc-settings" value="إعدادات النظام&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;System Settings&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#fef3c7;strokeColor=#b45309;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="632" width="160" height="68" as="geometry" />
+        </mxCell>
+
+        <mxCell id="uc-list" value="قائمة المستخدمين&lt;br&gt;&lt;font style=&quot;font-size:8px&quot;&gt;User list&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#f1f5f9;strokeColor=#475569;fontSize=9;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1320" y="520" width="120" height="52" as="geometry" />
+        </mxCell>
+        <mxCell id="uc-approve" value="الموافقة&lt;br&gt;&lt;font style=&quot;font-size:8px&quot;&gt;Approval&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#f1f5f9;strokeColor=#475569;fontSize=9;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1320" y="600" width="120" height="52" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-user-login" style="endArrow=none;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#334155;orthogonalLoop=1;" edge="1" parent="1" source="actor-user" target="uc-login">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-user-create" style="endArrow=none;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#334155;" edge="1" parent="1" source="actor-user" target="uc-create">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-user-text" style="endArrow=none;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#334155;" edge="1" parent="1" source="actor-user" target="uc-text">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-user-file" style="endArrow=none;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#334155;" edge="1" parent="1" source="actor-user" target="uc-file">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-user-email" style="endArrow=none;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#334155;" edge="1" parent="1" source="actor-user" target="uc-email">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-user-inbox" style="endArrow=none;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#334155;" edge="1" parent="1" source="actor-user" target="uc-inbox">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="gen-mgr-user" value="&lt;&lt;generalization&gt;&gt;" style="endArrow=block;endFill=0;html=1;strokeColor=#0f766e;strokeWidth=1.5;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;fontSize=9;fontColor=#0f766e;labelBackgroundColor=#f8fafc;" edge="1" parent="1" source="actor-mgr" target="actor-user">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="gen-admin-user" value="&lt;&lt;generalization&gt;&gt;" style="endArrow=block;endFill=0;html=1;strokeColor=#0f766e;strokeWidth=1.5;exitX=0;exitY=0.35;exitDx=0;exitDy=0;entryX=0;entryY=0.65;entryDx=0;entryDy=0;fontSize=9;fontColor=#0f766e;labelBackgroundColor=#f8fafc;" edge="1" parent="1" source="actor-admin" target="actor-user">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="32" y="600" />
+              <mxPoint x="32" y="200" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e-admin-users" style="endArrow=none;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#334155;" edge="1" parent="1" source="actor-admin" target="uc-users">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-admin-dept" style="endArrow=none;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#334155;" edge="1" parent="1" source="actor-admin" target="uc-dept">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-admin-policy" style="endArrow=none;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#334155;" edge="1" parent="1" source="actor-admin" target="uc-policy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-admin-alerts" style="endArrow=none;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#334155;" edge="1" parent="1" source="actor-admin" target="uc-alerts">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-admin-monitor" style="endArrow=none;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#334155;" edge="1" parent="1" source="actor-admin" target="uc-monitor">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-admin-settings" style="endArrow=none;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#334155;" edge="1" parent="1" source="actor-admin" target="uc-settings">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-mgr-users" value="نطاق القسم فقط&lt;br&gt;&lt;font style=&quot;font-size:8px&quot;&gt;Department scope&lt;/font&gt;" style="endArrow=none;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;dashed=1;dashPattern=8 8;strokeColor=#64748b;fontSize=9;" edge="1" parent="1" source="actor-mgr" target="uc-users">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="780" y="324" />
+              <mxPoint x="780" y="574" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="inc-login-verify" value="&lt;&lt;include&gt;&gt;" style="endArrow=open;dashed=1;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#475569;endSize=10;fontSize=9;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="uc-login" target="uc-verify">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="inc-create-detail" value="&lt;&lt;include&gt;&gt;" style="endArrow=open;dashed=1;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#475569;endSize=10;fontSize=9;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="uc-create" target="uc-acct-detail">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="inc-users-list" value="&lt;&lt;include&gt;&gt;" style="endArrow=open;dashed=1;html=1;exitX=1;exitY=0.35;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#475569;endSize=10;fontSize=9;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="uc-users" target="uc-list">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="inc-users-approve" value="&lt;&lt;include&gt;&gt;" style="endArrow=open;dashed=1;html=1;exitX=1;exitY=0.65;exitDx=0;exitDy=0;entryX=0;entryY=0.5;strokeColor=#475569;endSize=10;fontSize=9;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="uc-users" target="uc-approve">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="activity-register" name="Activity — تدفق إنشاء الحساب">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title-act" value="&lt;b&gt;تدفق إنشاء حساب جديد — Create Account Activity&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="200" y="20" width="480" height="32" as="geometry" />
+        </mxCell>
+
+        <mxCell id="a-start" value="" style="ellipse;html=1;shape=startState;fillColor=#000000;strokeColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="418" y="70" width="44" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="a1" value="أدخل اسم المستخدم&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Enter Username (3–100)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e0f2fe;strokeColor=#0369a1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="150" width="200" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="a2" value="أدخل البريد الإلكتروني&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Enter Email&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e0f2fe;strokeColor=#0369a1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="240" width="200" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="a3" value="اختر القسم&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Select Department (required)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e0f2fe;strokeColor=#0369a1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="330" width="200" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="a4" value="أدخل كلمة المرور&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Enter Password (min 6)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e0f2fe;strokeColor=#0369a1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="420" width="200" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="a5" value="تأكيد كلمة المرور&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Confirm Password&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e0f2fe;strokeColor=#0369a1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="510" width="200" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="a6" value="تسجيل&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Register — POST request&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fef3c7;strokeColor=#b45309;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="340" y="600" width="200" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="a7" value="الحساب يُنشأ — في انتظار الموافقة&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Account created — pending approval&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#166534;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="690" width="280" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="a-end" value="" style="ellipse;html=1;shape=endState;fillColor=#000000;strokeColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="418" y="780" width="44" height="44" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ea0" style="endArrow=block;html=1;strokeColor=#334155;endFill=1;" edge="1" parent="1" source="a-start" target="a1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ea1" style="endArrow=block;html=1;strokeColor=#334155;endFill=1;" edge="1" parent="1" source="a1" target="a2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ea2" style="endArrow=block;html=1;strokeColor=#334155;endFill=1;" edge="1" parent="1" source="a2" target="a3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ea3" style="endArrow=block;html=1;strokeColor=#334155;endFill=1;" edge="1" parent="1" source="a3" target="a4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ea4" style="endArrow=block;html=1;strokeColor=#334155;endFill=1;" edge="1" parent="1" source="a4" target="a5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ea5" style="endArrow=block;html=1;strokeColor=#334155;endFill=1;" edge="1" parent="1" source="a5" target="a6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ea6" style="endArrow=block;html=1;strokeColor=#334155;endFill=1;" edge="1" parent="1" source="a6" target="a7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ea7" style="endArrow=block;html=1;strokeColor=#334155;endFill=1;" edge="1" parent="1" source="a7" target="a-end">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

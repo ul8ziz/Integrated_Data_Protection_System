@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import Dict, Any, Optional
 from app.services.email_monitoring_service import EmailMonitoringService
 import logging
+import base64
 import email
 from email.utils import parseaddr
 
@@ -136,17 +137,26 @@ async def receive_raw_email(
         else:
             body = msg.get_payload(decode=True).decode('utf-8', errors='ignore')
         
-        # Extract attachments
+        # Extract attachments (base64 content for DLP + inbox download, same as JSON /receive)
         attachments = []
         if msg.is_multipart():
             for part in msg.walk():
                 if part.get_content_disposition() == "attachment":
                     filename = part.get_filename()
-                    if filename:
-                        attachments.append({
-                            "filename": filename,
-                            "content_type": part.get_content_type()
-                        })
+                    if not filename:
+                        continue
+                    try:
+                        payload = part.get_payload(decode=True)
+                    except Exception as ex:
+                        logger.warning("Could not decode attachment payload for %s: %s", filename, ex)
+                        continue
+                    if payload is None:
+                        continue
+                    attachments.append({
+                        "filename": filename,
+                        "content_type": part.get_content_type(),
+                        "content": base64.b64encode(payload).decode("ascii"),
+                    })
         
         # Get source IP from headers or request
         source_ip = request.client.host if request.client else "127.0.0.1"

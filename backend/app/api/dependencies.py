@@ -5,7 +5,7 @@ from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from typing import Optional
 from app.models_mongo.users import User, UserRole, UserStatus
-from app.services.auth_service import decode_access_token
+from app.services.auth_service import decode_access_token, JWT_TYPE_MFA_PENDING
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -36,6 +36,11 @@ async def get_current_user(
             logger.warning("Token decode failed - invalid token")
             raise credentials_exception
         
+        token_type = payload.get("type")
+        if token_type == JWT_TYPE_MFA_PENDING:
+            logger.warning("MFA pending token cannot be used as session token")
+            raise credentials_exception
+
         username: str = payload.get("sub")
         if username is None:
             logger.warning("Token payload missing 'sub' field")
@@ -136,6 +141,9 @@ async def get_optional_user(
             
             payload = decode_access_token(token)
             if payload is None:
+                return None
+
+            if payload.get("type") == JWT_TYPE_MFA_PENDING:
                 return None
             
             username: str = payload.get("sub")

@@ -3,10 +3,10 @@ User model for MongoDB using Beanie
 """
 from beanie import Document
 from pydantic import Field, EmailStr
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from enum import Enum
-from app.utils.datetime_utils import get_current_time
+from app.utils.datetime_utils import get_current_time, ensure_aware_for_compare
 
 
 class UserRole(str, Enum):
@@ -48,6 +48,20 @@ class User(Document):
     created_at: datetime = Field(default_factory=get_current_time)
     last_login: Optional[datetime] = None
     
+    # Login lockout (failed password attempts)
+    failed_login_attempts: int = 0
+    locked_until: Optional[datetime] = None
+
+    # TOTP (Google Authenticator) — secrets stored encrypted at rest
+    totp_enabled: bool = False
+    totp_secret_encrypted: Optional[str] = None
+    totp_pending_secret_encrypted: Optional[str] = None
+    mfa_failed_attempts: int = 0
+    mfa_locked_until: Optional[datetime] = None
+    
+    # Per-user policy assignment (None = apply all active policies; explicit list = only those IDs)
+    assigned_policy_ids: Optional[List[str]] = None
+    
     class Settings:
         name = "users"  # Collection name
         indexes = [
@@ -70,3 +84,13 @@ class User(Document):
     def can_login(self) -> bool:
         """Check if user can login (approved and active)"""
         return self.status in [UserStatus.APPROVED, UserStatus.ACTIVE] and self.is_active
+    
+    def is_login_locked(self, now: datetime) -> bool:
+        """True if account is temporarily locked after too many failed password attempts."""
+        locked_until = ensure_aware_for_compare(self.locked_until)
+        return locked_until is not None and locked_until > now
+
+    def is_mfa_locked(self, now: datetime) -> bool:
+        """True if temporarily locked after too many failed MFA code attempts."""
+        locked_until = ensure_aware_for_compare(self.mfa_locked_until)
+        return locked_until is not None and locked_until > now

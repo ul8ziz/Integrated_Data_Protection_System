@@ -21,6 +21,10 @@ spacy>=3.7.0
 # Encryption
 cryptography>=41.0.7
 
+# TOTP / Google Authenticator (RFC 6238)
+pyotp>=2.9.0
+qrcode[pil]>=7.4.2
+
 # Authentication
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4

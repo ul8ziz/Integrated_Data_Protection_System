@@ -1669,6 +1669,157 @@ header {
     opacity: 1;
 }
 
+/* User policy assignments modal */
+.modal-content-wide {
+    max-width: 560px;
+}
+
+.modal-subtitle {
+    margin: 4px 0 0;
+    font-size: 0.95rem;
+    color: #6b7280;
+    font-weight: normal;
+}
+
+.policy-assignments-hint {
+    font-size: 0.875rem;
+    color: #92400e;
+    background: #fffbeb;
+    padding: 10px 14px;
+    border-radius: 10px;
+    margin: 0 1.25rem 12px;
+    border: 1px solid #fde68a;
+}
+
+.policy-assignments-list {
+    /* Extra inset at modal start so checkboxes are not flush with the edge */
+    padding-top: 8px;
+    padding-bottom: 1rem;
+    padding-inline-end: 1.25rem;
+    padding-inline-start: 2rem;
+    max-height: min(420px, 55vh);
+    overflow-y: auto;
+    flex: 1;
+    box-sizing: border-box;
+}
+
+/* LTR row so checkbox stays on the physical left; label uses dir="auto" for Arabic */
+.policy-assignment-row {
+    display: flex;
+    flex-direction: row;
+    direction: ltr;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 12px 8px;
+    border-bottom: 1px solid #e5e7eb;
+    box-sizing: border-box;
+}
+
+.policy-assignment-row:last-child {
+    border-bottom: none;
+}
+
+.policy-assignment-row-disabled {
+    opacity: 0.7;
+}
+
+.policy-assignment-row__check {
+    flex: 0 0 24px;
+    width: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-top: 2px;
+    box-sizing: border-box;
+}
+
+.policy-assignment-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    margin: 0;
+    flex-shrink: 0;
+    cursor: pointer;
+    accent-color: var(--primary-color, #6366f1);
+}
+
+.policy-assignment-row label {
+    cursor: pointer;
+    flex: 1;
+    min-width: 0;
+    line-height: 1.45;
+    font-weight: 600;
+    text-align: start;
+    unicode-bidi: isolate;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    padding-top: 1px;
+}
+
+.policy-assignment-meta {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: normal;
+    color: #6b7280;
+    margin-top: 4px;
+    line-height: 1.35;
+}
+
+/* Email attachment card: download original + text extract preview */
+.attachment-download-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0 4px;
+}
+
+.attachment-download-hint {
+    font-size: 0.75rem;
+    color: #6b7280;
+}
+
+.attachment-preview-label {
+    display: block;
+    font-size: 0.75rem;
+    color: #6b7280;
+    margin: 6px 0 2px;
+}
+
+.attachment-too-large-hint {
+    font-size: 0.85rem;
+    margin: 6px 0 0;
+}
+
+/* Full operation audit (admin User Activity → row → details) */
+.activity-metadata-preview {
+    max-width: 240px;
+    word-break: break-word;
+    font-size: 0.8rem;
+}
+
+.operation-full-audit-details summary {
+    cursor: pointer;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #374151;
+}
+
+.operation-audit-pre {
+    max-height: 280px;
+    overflow: auto;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    background: #f9fafb;
+    padding: 10px 12px;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 /* Alert notification overlay: ensure modal content is visible (modal-content defaults to opacity:0 until .modal-overlay.show) */
 .alert-notification-overlay .modal-content {
     opacity: 1 !important;
@@ -3693,4 +3844,330 @@ table.email-entities-table {
     .action-status-arabic {
         font-size: 1rem;
     }
+}
+
+/* --------------------------------------------------------------------------
+   Security / Two-factor authentication (Google Authenticator) modal
+   -------------------------------------------------------------------------- */
+#security2faModal .modal-content.security-2fa-sheet {
+    display: flex;
+    flex-direction: column;
+    max-width: 640px;
+    width: calc(100% - 32px);
+    max-height: min(94vh, 900px);
+    overflow: hidden;
+}
+
+#security2faModal .modal-body-content.security-2fa-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    flex-direction: column;
+    width: 100%;
+    padding: 0;
+    background: #ffffff;
+}
+
+.security-2fa-top-accent {
+    display: block;
+    height: 4px;
+    width: 100%;
+    flex-shrink: 0;
+    background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
+}
+
+.security-2fa-body {
+    padding: 28px 32px 32px;
+}
+
+.security-2fa-header {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    margin-bottom: 26px;
+    padding-right: 40px;
+}
+
+.security-2fa-header-icon {
+    flex-shrink: 0;
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.14) 0%, rgba(236, 72, 153, 0.12) 100%);
+    color: var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.security-2fa-header-text h3 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--dark);
+    margin: 0 0 8px 0;
+    line-height: 1.25;
+}
+
+.security-2fa-header-text p {
+    margin: 0;
+    color: #64748b;
+    font-size: 0.95rem;
+    line-height: 1.55;
+}
+
+.security-2fa-steps {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 20px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.security-2fa-steps li {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    font-size: 0.95rem;
+    color: #334155;
+    line-height: 1.5;
+}
+
+.security-2fa-step-num {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 1px;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
+}
+
+.security-2fa-begin-btn {
+    min-height: 48px;
+    font-weight: 600;
+}
+
+.security-2fa-verify-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    animation: security2faPanelIn 0.35s ease;
+    flex: 0 1 auto;
+    min-height: 0;
+}
+
+.security-2fa-verify-lead {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #64748b;
+    line-height: 1.45;
+    flex-shrink: 0;
+}
+
+/* Scrollable QR / secret area so the confirm row stays visible above the fold */
+.security-2fa-setup-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: min(42vh, 380px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 4px;
+    margin-right: -4px;
+}
+
+@keyframes security2faPanelIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.security-2fa-setup-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    align-items: stretch;
+}
+
+@media (max-width: 600px) {
+    .security-2fa-setup-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .security-2fa-body {
+        padding: 22px 20px 24px;
+    }
+}
+
+.security-2fa-panel {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+}
+
+.security-2fa-label {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748b;
+    margin-bottom: 8px;
+}
+
+.security-2fa-panel-hint {
+    font-size: 0.85rem;
+    color: #94a3b8;
+    margin: 0 0 14px 0;
+    line-height: 1.45;
+}
+
+.security-2fa-qr-frame {
+    align-self: flex-start;
+    background: #fff;
+    padding: 14px;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+}
+
+.security-2fa-qr-frame img {
+    display: block;
+    border-radius: 4px;
+    max-width: 100%;
+    height: auto;
+}
+
+/* High-contrast secret: fixes invisible text on dark bar (was same as body text) */
+.security-2fa-secret-box {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+}
+
+.security-2fa-secret {
+    font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+    font-size: 0.8125rem;
+    line-height: 1.55;
+    color: #f1f5f9;
+    background: #0f172a;
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    border-radius: 10px;
+    padding: 12px 14px;
+    word-break: break-all;
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.security-2fa-copy-btn {
+    align-self: flex-start;
+}
+
+.security-2fa-confirm-block {
+    flex-shrink: 0;
+    margin-top: 0;
+    padding: 20px;
+    background: linear-gradient(180deg, #f0f9ff 0%, #ffffff 100%);
+    border: 2px solid rgba(99, 102, 241, 0.35);
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.08);
+}
+
+/* Confirm field has no left icon — align label/padding with other modals */
+.security-2fa-floating .form-input.security-2fa-code-input {
+    padding-left: 16px;
+    padding-right: 16px;
+}
+
+.security-2fa-floating label {
+    left: 16px;
+}
+
+.security-2fa-floating .form-input:focus + label,
+.security-2fa-floating .form-input:not(:placeholder-shown) + label {
+    left: 12px;
+}
+
+.security-2fa-confirm-intro {
+    margin: 0 0 14px 0;
+    font-size: 0.9rem;
+    color: #64748b;
+    line-height: 1.45;
+}
+
+.security-2fa-code-input {
+    letter-spacing: 0.3em;
+    font-size: 1.1rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.security-2fa-disable {
+    margin-top: 24px;
+    padding: 22px;
+    border-radius: 16px;
+    border: 1px solid #fde68a;
+    background: linear-gradient(180deg, #fffbeb 0%, #ffffff 100%);
+}
+
+.security-2fa-disable-title {
+    font-size: 1.05rem;
+    margin: 0 0 8px 0;
+    color: var(--dark);
+    font-weight: 700;
+}
+
+.security-2fa-disable-desc {
+    margin: 0 0 16px 0;
+    font-size: 0.9rem;
+    color: #64748b;
+    line-height: 1.45;
+}
+
+.security-2fa-disable-btn {
+    border: 1px solid rgba(220, 38, 38, 0.45) !important;
+    color: #b91c1c !important;
+    background: #ffffff !important;
+}
+
+.security-2fa-disable-btn:hover:not(:disabled) {
+    background: #fef2f2 !important;
+    border-color: rgba(185, 28, 28, 0.55) !important;
+}
+
+.security-2fa-status {
+    margin: 18px 0 0 0;
+    padding: 12px 14px;
+    font-size: 0.875rem;
+    color: #475569;
+    background: #f1f5f9;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+    line-height: 1.45;
+}
+
+.security-2fa-status:empty {
+    display: none;
 }

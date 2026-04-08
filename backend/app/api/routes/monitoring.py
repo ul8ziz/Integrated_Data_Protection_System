@@ -2,9 +2,10 @@
 API routes for monitoring and reports
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, Path
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from app.utils.datetime_utils import get_current_time, format_datetime_server, to_iso_utc
+from app.utils.audit_sanitize import sanitize_extra_data
 from app.models_mongo.logs import Log, DetectedEntity
 from app.models_mongo.alerts import Alert
 from app.models_mongo.policies import Policy
@@ -24,6 +25,28 @@ email_monitoring = EmailMonitoringService()
 import logging
 logger = logging.getLogger(__name__)
 logger.info(f"MyDLP service initialized - enabled: {mydlp_service.is_enabled()}, API URL: {mydlp_service.api_url}")
+
+
+async def _policy_names_from_matching_ids(meta: Optional[Dict[str, Any]]) -> List[str]:
+    """Resolve matching_policy_ids in log metadata to policy display names."""
+    if not meta:
+        return []
+    ids = meta.get("matching_policy_ids") or []
+    if not ids:
+        return []
+    from bson import ObjectId
+
+    oids = []
+    for pid in ids:
+        try:
+            oids.append(ObjectId(pid))
+        except Exception:
+            pass
+    if not oids:
+        return [str(i) for i in ids]
+    policies = await Policy.find({"_id": {"$in": oids}}).to_list()
+    policy_id_to_name = {str(p.id): (p.name or str(p.id)) for p in policies}
+    return [policy_id_to_name.get(str(pid), str(pid)) for pid in ids]
 
 
 @router.get("/status")
@@ -194,7 +217,7 @@ async def get_logs_report(
                     "source_user": log.source_user,
                     "created_at": to_iso_utc(log.created_at),
                     "created_at_server": format_datetime_server(log.created_at),
-                    "metadata": log.extra_data
+                    "metadata": sanitize_extra_data(log.extra_data) if log.extra_data else None,
                 }
                 for log in logs
             ],
@@ -208,6 +231,62 @@ async def get_logs_report(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching logs: {str(e)}")
+
+
+@router.get("/operations/{log_id}")
+async def get_operation_audit(
+    log_id: str,
+    include_binary_attachment_payloads: bool = Query(
+        False,
+        description="When true, includes raw base64 attachment payloads (admin download / forensics).",
+    ),
+    current_user=Depends(get_current_admin),
+):
+    """
+    Full single-operation record for admin audit. By default metadata is redacted for large binary fields.
+    Set include_binary_attachment_payloads=true to retrieve stored attachment bytes (same as inbox download).
+    """
+    try:
+        from beanie import PydanticObjectId
+        from bson.errors import InvalidId
+
+        try:
+            oid = PydanticObjectId(log_id)
+        except (InvalidId, TypeError, ValueError, Exception):
+            raise HTTPException(status_code=404, detail="Log not found")
+        log = await Log.get(oid)
+        if not log:
+            raise HTTPException(status_code=404, detail="Log not found")
+        raw_meta = log.extra_data or {}
+        if include_binary_attachment_payloads:
+            meta: Any = raw_meta
+        else:
+            meta = sanitize_extra_data(raw_meta)
+        policy_names = await _policy_names_from_matching_ids(raw_meta)
+        return {
+            "id": str(log.id),
+            "event_type": log.event_type,
+            "message": log.message,
+            "level": log.level,
+            "source_ip": log.source_ip,
+            "source_user": log.source_user,
+            "user_agent": log.user_agent,
+            "file_name": log.file_name,
+            "file_size": log.file_size,
+            "file_type": log.file_type,
+            "network_destination": log.network_destination,
+            "network_protocol": log.network_protocol,
+            "created_at": to_iso_utc(log.created_at),
+            "created_at_server": format_datetime_server(log.created_at),
+            "metadata": meta,
+            "policy_names": policy_names,
+            "payloads_included": include_binary_attachment_payloads,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_operation_audit: {e}")
+        raise HTTPException(status_code=500, detail="Error loading operation log")
 
 
 @router.post("/email")
@@ -343,6 +422,54 @@ async def get_email_list_inbox(
         raise HTTPException(status_code=500, detail=f"Error fetching email list: {str(e)}")
 
 
+@router.get("/email/log/{log_id}")
+async def get_email_log_detail(
+    log_id: str,
+    current_user=Depends(get_current_user),
+):
+    """
+    Full stored email_data for one inbox message (includes attachment_files for download).
+    Only if the current user is listed as a recipient on the message.
+    """
+    try:
+        from beanie import PydanticObjectId
+        from bson.errors import InvalidId
+
+        try:
+            oid = PydanticObjectId(log_id)
+        except (InvalidId, TypeError, ValueError, Exception):
+            raise HTTPException(status_code=404, detail="Email not found")
+        log = await Log.get(oid)
+        if not log or log.event_type != "email_received":
+            raise HTTPException(status_code=404, detail="Email not found")
+        extra = log.extra_data or {}
+        recipient_identifiers = []
+        if getattr(current_user, "email", None):
+            recipient_identifiers.append(current_user.email)
+        if getattr(current_user, "username", None) and current_user.username not in recipient_identifiers:
+            recipient_identifiers.append(current_user.username)
+        if not recipient_identifiers:
+            raise HTTPException(status_code=403, detail="Cannot identify recipient")
+        to_list = extra.get("to") or []
+        if not to_list:
+            raise HTTPException(status_code=403, detail="Access denied")
+        to_set = set(str(x).strip().lower() for x in to_list)
+        if not any(str(rid).strip().lower() in to_set for rid in recipient_identifiers):
+            raise HTTPException(status_code=403, detail="You are not a recipient of this email.")
+        return {
+            "id": str(log.id),
+            "email_data": extra,
+            "message": log.message,
+            "created_at": to_iso_utc(log.created_at),
+            "created_at_server": format_datetime_server(log.created_at),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_email_log_detail: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error loading email")
+
+
 @router.get("/email/log/{log_id}/analysis")
 async def get_email_log_analysis(
     log_id: str = Path(..., description="MongoDB log id of the email_received event"),
@@ -463,6 +590,7 @@ async def get_user_activities(
         analysis_operations = []
         
         for log in user_logs:
+            safe_meta = sanitize_extra_data(log.extra_data) if log.extra_data else {}
             operation = {
                 "id": str(log.id),
                 "event_type": log.event_type,
@@ -472,7 +600,7 @@ async def get_user_activities(
                 "timestamp_server": format_datetime_server(log.created_at),
                 "source_ip": log.source_ip,
                 "user_agent": log.user_agent,
-                "metadata": log.extra_data or {}
+                "metadata": safe_meta,
             }
             
             # Add file information if available
@@ -564,7 +692,7 @@ async def get_user_activities(
                         "source_user": log.source_user,
                         "file_name": log.file_name,
                         "network_destination": log.network_destination,
-                        "metadata": log.extra_data or {},
+                        "metadata": sanitize_extra_data(log.extra_data) if log.extra_data else {},
                         "policy_names": policy_names_for_log(log)
                     }
                     for log in user_logs

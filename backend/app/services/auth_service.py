@@ -23,6 +23,10 @@ ALGORITHM = "HS256"
 # - 720 hours (30 days) for long sessions
 ACCESS_TOKEN_EXPIRE_HOURS = 24
 
+# JWT claim: token purpose (access vs MFA step)
+JWT_TYPE_ACCESS = "access"
+JWT_TYPE_MFA_PENDING = "mfa_pending"
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against a hash"""
@@ -68,24 +72,43 @@ def get_password_hash(password: str) -> str:
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """
-    Create JWT access token
-    
-    Args:
-        data: Data to encode in token (usually user info)
-        expires_delta: Optional expiration time
-        
-    Returns:
-        Encoded JWT token
+    Create JWT access token (full session). Includes iat, type=access, and caller claims (sub, user_id, role).
     """
     to_encode = data.copy()
     if expires_delta:
         expire = get_current_time() + expires_delta
     else:
         expire = get_current_time() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
-    
-    to_encode.update({"exp": expire})
+
+    now = get_current_time()
+    to_encode.update(
+        {
+            "exp": expire,
+            "iat": int(now.timestamp()),
+            "type": JWT_TYPE_ACCESS,
+        }
+    )
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+
+def create_mfa_pending_token(username: str) -> tuple[str, int]:
+    """
+    Short-lived token after password OK, before TOTP verification.
+    Returns (jwt, expires_in_seconds).
+    """
+    minutes = max(1, settings.MFA_PENDING_TOKEN_EXPIRE_MINUTES)
+    delta = timedelta(minutes=minutes)
+    now = get_current_time()
+    expire = now + delta
+    to_encode = {
+        "sub": username,
+        "exp": expire,
+        "iat": int(now.timestamp()),
+        "type": JWT_TYPE_MFA_PENDING,
+    }
+    encoded = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
+    return encoded, int(delta.total_seconds())
 
 
 def decode_access_token(token: str) -> Optional[dict]:

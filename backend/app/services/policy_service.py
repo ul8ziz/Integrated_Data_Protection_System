@@ -1,7 +1,11 @@
 """
 Policy service for managing data protection policies - MongoDB version
 """
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models_mongo.users import User as UserModel
+
 from app.models_mongo.policies import Policy
 from app.models_mongo.alerts import Alert, AlertSeverity, AlertStatus
 from app.models_mongo.logs import Log, DetectedEntity
@@ -13,6 +17,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def entity_type_matches_policy(entity_type: str, policy_entities: List[str]) -> bool:
+    """
+    Whether a detected Presidio entity type is covered by a policy's entity_types list.
+    Presidio often labels street addresses as LOCATION while policies use ADDRESS (or the reverse).
+    """
+    if not entity_type or not policy_entities:
+        return False
+    if entity_type in policy_entities:
+        return True
+    if "ADDRESS" in policy_entities and entity_type == "LOCATION":
+        return True
+    if "LOCATION" in policy_entities and entity_type == "ADDRESS":
+        return True
+    return False
+
+
 class PolicyService:
     """Service for managing and applying data protection policies"""
     
@@ -22,17 +42,33 @@ class PolicyService:
         self.mydlp = MyDLPService()
         self.encryption = EncryptionService()
     
-    async def get_active_policies(self) -> List[Policy]:
+    async def get_active_policies(
+        self,
+        user: Optional["UserModel"] = None,
+    ) -> List[Policy]:
         """
-        Get all active policies (enabled and not deleted)
-        
-        Returns:
-            List of active policies
+        Get active policies (enabled and not deleted), optionally filtered by per-user assignment.
+
+        If user.assigned_policy_ids is None: return all active policies (default system behavior).
+        If user.assigned_policy_ids is set (including []): return only policies whose id is in the list.
         """
-        return await Policy.find({"enabled": True, "is_deleted": False}).to_list()
+        policies = await Policy.find({"enabled": True, "is_deleted": False}).to_list()
+        if user is None:
+            return policies
+        assigned = getattr(user, "assigned_policy_ids", None)
+        if assigned is None:
+            return policies
+        allowed = set(assigned)
+        return [p for p in policies if str(p.id) in allowed]
     
-    async def apply_policy(self, text: str, source_ip: str = None, 
-                    source_user: str = None, source_device: str = None) -> Dict[str, Any]:
+    async def apply_policy(
+        self,
+        text: str,
+        source_ip: str = None,
+        source_user: str = None,
+        source_device: str = None,
+        user: Optional["UserModel"] = None,
+    ) -> Dict[str, Any]:
         """
         Apply policies to text and take appropriate actions
         
@@ -53,14 +89,21 @@ class PolicyService:
             text=text,
             source_ip=source_ip,
             source_user=source_user,
-            source_device=source_device
+            source_device=source_device,
+            user=user,
         )
     
-    async def apply_policy_with_entities(self, detected_entities: List[Dict], 
-                                   text: str = None, source_ip: str = None, 
-                                   source_user: str = None, source_device: str = None,
-                                   source_attachment_names: Optional[List[str]] = None,
-                                   alert_extra_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def apply_policy_with_entities(
+        self,
+        detected_entities: List[Dict],
+        text: str = None,
+        source_ip: str = None,
+        source_user: str = None,
+        source_device: str = None,
+        source_attachment_names: Optional[List[str]] = None,
+        alert_extra_data: Optional[Dict[str, Any]] = None,
+        user: Optional["UserModel"] = None,
+    ) -> Dict[str, Any]:
         """
         Apply policies using pre-detected entities (avoids re-analysis)
         
@@ -80,11 +123,15 @@ class PolicyService:
                 "sensitive_data_detected": False,
                 "actions_taken": [],
                 "blocked": False,
-                "alert_created": False
+                "alert_created": False,
+                "last_alert_id": None,
+                "policies_matched": False,
+                "applied_policies": [],
+                "encrypted_text": None,
             }
         
-        # Get active policies (enabled and not deleted)
-        policies = await self.get_active_policies()
+        # Get active policies (enabled and not deleted), filtered by user assignment when set
+        policies = await self.get_active_policies(user=user)
         
         # If no active policies exist, return early - no actions should be taken
         if not policies:
@@ -98,13 +145,15 @@ class PolicyService:
                 "alert_created": False,
                 "policies_matched": False,
                 "applied_policies": [],
-                "encrypted_text": None
+                "encrypted_text": None,
+                "last_alert_id": None,
             }
         
         # Check which policies apply
         actions_taken = []
         blocked = False
         alert_created = False
+        last_alert_id: Optional[str] = None
         matching_policies = []  # Track policies that actually match
         
         for policy in policies:
@@ -112,7 +161,7 @@ class PolicyService:
             policy_entities = policy.entity_types or []
             relevant_entities = [
                 e for e in detected_entities 
-                if e["entity_type"] in policy_entities
+                if entity_type_matches_policy(e["entity_type"], policy_entities)
             ]
             
             if not relevant_entities:
@@ -129,7 +178,7 @@ class PolicyService:
                 blocked = True
                 actions_taken.append(f"blocked_by_policy_{policy.id}")
                 # Always create alert for block policy (so Blocked Attempts count updates in Monitoring)
-                await self._create_alert(
+                aid = await self._create_alert(
                     policy=policy,
                     detected_entities=relevant_entities,
                     source_ip=source_ip,
@@ -139,6 +188,8 @@ class PolicyService:
                     attachment_names=source_attachment_names,
                     extra_data=alert_extra_data
                 )
+                if aid:
+                    last_alert_id = aid
                 alert_created = True
                 # Attempt actual block via MyDLP (optional; alert already created)
                 block_result = self.mydlp.block_data_transfer(
@@ -164,7 +215,7 @@ class PolicyService:
                 logger.info(f"Encrypted {len(relevant_entities)} entities for policy {policy.id}")
                 # Notify manager: create alert (email allowed but with encryption applied)
                 if not alert_created:
-                    await self._create_alert(
+                    aid = await self._create_alert(
                         policy=policy,
                         detected_entities=relevant_entities,
                         source_ip=source_ip,
@@ -174,13 +225,15 @@ class PolicyService:
                         attachment_names=source_attachment_names,
                         extra_data=alert_extra_data
                     )
+                    if aid:
+                        last_alert_id = aid
                     alert_created = True
                     actions_taken.append("alert_created")
             
             elif policy.action == "alert":
                 # Create alert
                 if not alert_created:
-                    await self._create_alert(
+                    aid = await self._create_alert(
                         policy=policy,
                         detected_entities=relevant_entities,
                         source_ip=source_ip,
@@ -190,6 +243,8 @@ class PolicyService:
                         attachment_names=source_attachment_names,
                         extra_data=alert_extra_data
                     )
+                    if aid:
+                        last_alert_id = aid
                     alert_created = True
                     actions_taken.append("alert_created")
         
@@ -240,31 +295,36 @@ class PolicyService:
             encrypted_text = text
             # Sort entities by start position (descending) to replace from end to start
             # This prevents position shifts when replacing
-            entities_to_encrypt = []
+            entities_to_encrypt: List[Dict[str, Any]] = []
+            seen_spans = set()
             for policy in matching_policies:
                 if policy.action == "encrypt":
                     policy_entities = policy.entity_types or []
                     for entity in detected_entities:
-                        if (entity["entity_type"] in policy_entities and 
-                            "encrypted_value" in entity):
-                            entities_to_encrypt.append(entity)
+                        if not entity_type_matches_policy(entity["entity_type"], policy_entities):
+                            continue
+                        if "encrypted_value" not in entity:
+                            continue
+                        key = (entity["start"], entity["end"])
+                        if key in seen_spans:
+                            continue
+                        seen_spans.add(key)
+                        entities_to_encrypt.append(entity)
             
-            # Sort by start position descending
+            # Sort by start position descending (replace from end so Fernet length changes do not invalidate earlier spans)
             entities_to_encrypt.sort(key=lambda x: x["start"], reverse=True)
             
-            # Replace original values with encrypted values in text
+            # Replace using the actual substring at each span (avoids mismatch when value != slice e.g. CRLF)
             for entity in entities_to_encrypt:
                 start = entity["start"]
                 end = entity["end"]
-                original = entity.get("original_value", entity["value"])
-                encrypted = entity["encrypted_value"]
-                
-                # Replace in text
-                if encrypted_text[start:end] == original:
-                    encrypted_text = encrypted_text[:start] + encrypted + encrypted_text[end:]
-                    logger.debug(f"Replaced {original} with encrypted value at position {start}-{end}")
-                else:
-                    logger.warning(f"Text mismatch at position {start}-{end}: expected '{original}', found '{encrypted_text[start:end]}'")
+                if start < 0 or end > len(encrypted_text) or start >= end:
+                    logger.warning("Skipping invalid encrypt span %s-%s", start, end)
+                    continue
+                plain_span = encrypted_text[start:end]
+                repl = self.encryption.encrypt(plain_span)
+                encrypted_text = encrypted_text[:start] + repl + encrypted_text[end:]
+                logger.debug("Encrypted span at %s-%s (len %s)", start, end, len(plain_span))
             
             logger.info(f"Text encrypted: {len(entities_to_encrypt)} entities replaced")
         
@@ -274,7 +334,7 @@ class PolicyService:
             policy_entities = policy.entity_types or []
             relevant_entities = [
                 e for e in detected_entities 
-                if e["entity_type"] in policy_entities
+                if entity_type_matches_policy(e["entity_type"], policy_entities)
             ]
             applied_policies.append({
                 "id": str(policy.id),
@@ -294,15 +354,16 @@ class PolicyService:
             "alert_created": alert_created,
             "policies_matched": len(matching_policies) > 0,
             "applied_policies": applied_policies,
-            "encrypted_text": encrypted_text
+            "encrypted_text": encrypted_text,
+            "last_alert_id": last_alert_id,
         }
     
     async def _create_alert(self, policy: Policy, detected_entities: List[Dict],
                      source_ip: str = None, source_user: str = None,
                      source_device: str = None, blocked: bool = False,
                      attachment_names: Optional[List[str]] = None,
-                     extra_data: Optional[Dict[str, Any]] = None):
-        """Create an alert for policy violation"""
+                     extra_data: Optional[Dict[str, Any]] = None) -> Optional[str]:
+        """Create an alert for policy violation. Returns new alert id or None."""
         try:
             # Determine severity based on policy
             severity_map = {
@@ -338,9 +399,11 @@ class PolicyService:
             
             await alert.insert()
             logger.info(f"Alert created: {alert.id}")
+            return str(alert.id)
             
         except Exception as e:
             logger.error(f"Error creating alert: {e}")
+            return None
     
     async def _log_event(self, event_type: str, message: str,
                    source_ip: str = None, source_user: str = None, metadata: Dict = None):

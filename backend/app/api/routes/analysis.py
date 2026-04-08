@@ -70,7 +70,8 @@ async def analyze_text(
                 text=request.text,
                 source_ip=source_ip,
                 source_user=source_user,
-                source_device=request.source_device
+                source_device=request.source_device,
+                user=current_user,
             )
             
             # Convert to response format
@@ -237,7 +238,8 @@ async def analyze_file(
                 text=extracted_text,
                 source_ip=source_ip,
                 source_user=final_source_user,
-                source_device=source_device
+                source_device=source_device,
+                user=current_user,
             )
             
             # Convert to response format

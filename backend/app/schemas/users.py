@@ -1,7 +1,7 @@
 """
 Schemas for user management and authentication
 """
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 from app.utils.validators import (
@@ -101,6 +101,7 @@ class UserResponse(UserBase):
     rejection_reason: Optional[str] = None
     department_id: Optional[str] = None
     department_name: Optional[str] = None
+    totp_enabled: bool = False
     
     class Config:
         from_attributes = True
@@ -153,6 +154,55 @@ class TokenResponse(BaseModel):
     user: UserResponse
 
 
+class MFARequiredResponse(BaseModel):
+    """Password OK; user must complete TOTP (Google Authenticator)."""
+    mfa_required: bool = True
+    mfa_token: str
+    token_type: str = "mfa_pending"
+    expires_in: int = Field(..., description="Seconds until mfa_token expires")
+
+
+class MFAVerifyRequest(BaseModel):
+    """Complete login after MFA."""
+    mfa_token: str = Field(..., min_length=10)
+    code: str = Field(..., min_length=6, max_length=8, description="6-digit TOTP from authenticator app")
+
+    @field_validator("code")
+    @classmethod
+    def digits_only(cls, v: str) -> str:
+        s = v.strip().replace(" ", "")
+        if not s.isdigit():
+            raise ValueError("Code must be numeric")
+        if len(s) < 6 or len(s) > 8:
+            raise ValueError("Invalid code length")
+        return s
+
+
+class MFASetupStartResponse(BaseModel):
+    otpauth_uri: str
+    secret_base32: str = Field(..., description="Manual entry in Google Authenticator if QR unavailable")
+    qr_code_png_base64: str = Field(..., description="PNG image as base64 (no data: prefix)")
+
+
+class MFASetupConfirmRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=8)
+
+    @field_validator("code")
+    @classmethod
+    def digits_only(cls, v: str) -> str:
+        s = v.strip().replace(" ", "")
+        if not s.isdigit():
+            raise ValueError("Code must be numeric")
+        return s
+
+
+class MFADisableRequest(BaseModel):
+    password: str = Field(..., min_length=1)
+    code: Optional[str] = Field(None, description="Required when TOTP is enabled")
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ApproveUserRequest(BaseModel):
     """Schema for approving a user"""
     pass
@@ -161,4 +211,26 @@ class ApproveUserRequest(BaseModel):
 class RejectUserRequest(BaseModel):
     """Schema for rejecting a user"""
     reason: Optional[str] = Field(None, description="Reason for rejection")
+
+
+class PolicyAssignmentOption(BaseModel):
+    """One policy row for user assignment UI"""
+    id: str
+    name: str
+    enabled: bool
+    action: str
+
+
+class UserPolicyAssignmentsResponse(BaseModel):
+    """All policies (non-deleted) and current assignment for a user"""
+    user_id: str
+    username: str
+    policies: List[PolicyAssignmentOption]
+    assigned_policy_ids: Optional[List[str]] = None
+
+
+class UpdateUserPolicyAssignmentsRequest(BaseModel):
+    """Replace explicit policy assignment for a user (empty list = no policies)"""
+    policy_ids: List[str] = Field(..., description="Policy IDs to apply to this user")
+    model_config = ConfigDict(extra="forbid")
 

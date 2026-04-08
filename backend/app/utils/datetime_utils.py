@@ -32,6 +32,18 @@ def get_timezone() -> timezone:
     return timezone.utc
 
 
+def ensure_aware_for_compare(dt: Optional[datetime]) -> Optional[datetime]:
+    """
+    Make datetime timezone-aware for safe comparison with get_current_time().
+    Naive values are treated as UTC (MongoDB / BSON often returns naive UTC).
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def get_current_time() -> datetime:
     """
     Get current datetime with configured timezone

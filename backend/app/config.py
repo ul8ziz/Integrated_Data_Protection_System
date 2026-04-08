@@ -69,6 +69,22 @@ class Settings(BaseSettings):
     # Timezone
     TIMEZONE: str = os.getenv("TIMEZONE", "UTC")
     
+    # Login lockout (brute-force mitigation)
+    LOGIN_MAX_FAILED_ATTEMPTS: int = int(os.getenv("LOGIN_MAX_FAILED_ATTEMPTS", "3"))
+    LOGIN_LOCKOUT_SECONDS: int = int(os.getenv("LOGIN_LOCKOUT_SECONDS", "60"))
+
+    # MFA / TOTP (Google Authenticator)
+    MFA_PENDING_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("MFA_PENDING_TOKEN_EXPIRE_MINUTES", "10"))
+    # Issuer label shown in the authenticator app (service name, not "Google Authenticator")
+    TOTP_ISSUER: str = os.getenv("TOTP_ISSUER", os.getenv("APP_NAME", "Secure Data Protection System"))
+    MFA_MAX_FAILED_ATTEMPTS: int = int(os.getenv("MFA_MAX_FAILED_ATTEMPTS", "5"))
+    MFA_LOCKOUT_SECONDS: int = int(os.getenv("MFA_LOCKOUT_SECONDS", "300"))
+    
+    # Email inbox: max raw attachment bytes stored per file in log (MongoDB document limit)
+    EMAIL_ATTACHMENT_MAX_STORE_BYTES: int = int(
+        os.getenv("EMAIL_ATTACHMENT_MAX_STORE_BYTES", str(5 * 1024 * 1024))
+    )
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

@@ -9,13 +9,33 @@ from app.utils.datetime_utils import get_current_time
 from app.models_mongo.users import User, UserRole, UserStatus
 from app.schemas.users import (
     UserResponse, UserDetailResponse, UserCreate, UserUpdate,
-    ApproveUserRequest, RejectUserRequest
+    ApproveUserRequest, RejectUserRequest,
+    PolicyAssignmentOption, UserPolicyAssignmentsResponse, UpdateUserPolicyAssignmentsRequest,
 )
+from app.models_mongo.policies import Policy
 from app.services.auth_service import get_password_hash
 from app.api.dependencies import get_current_admin, get_current_admin_or_manager
 from app.models_mongo.departments import Department
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
+
+
+async def _get_user_for_admin_or_manager(user_id: str, current_user: User) -> User:
+    """Load user by id or 404; apply manager department scope (same as get_user)."""
+    try:
+        user = await User.get(user_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    if current_user.role == UserRole.MANAGER:
+        if getattr(user, "department_id", None) != getattr(current_user, "department_id", None):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+    return user
 
 
 async def _user_to_detail_response(user: User) -> UserDetailResponse:
@@ -42,6 +62,7 @@ async def _user_to_detail_response(user: User) -> UserDetailResponse:
         rejection_reason=user.rejection_reason,
         department_id=getattr(user, "department_id", None),
         department_name=department_name,
+        totp_enabled=bool(getattr(user, "totp_enabled", False)),
     )
 
 
@@ -209,6 +230,100 @@ async def get_user(
             )
     
     return await _user_to_detail_response(user)
+
+
+@router.get("/{user_id}/policy-assignments", response_model=UserPolicyAssignmentsResponse)
+async def get_user_policy_assignments(
+    user_id: str,
+    current_user: User = Depends(get_current_admin_or_manager),
+):
+    """
+    List all non-deleted policies and this user's assignment (null = default: all active policies apply).
+    """
+    user = await _get_user_for_admin_or_manager(user_id, current_user)
+    all_policies = await Policy.find({}).to_list()
+    policies_list = [p for p in all_policies if not getattr(p, "is_deleted", False)]
+    policies_list.sort(key=lambda x: (x.name or "").lower())
+    policies = [
+        PolicyAssignmentOption(
+            id=str(p.id),
+            name=p.name,
+            enabled=bool(p.enabled),
+            action=p.action,
+        )
+        for p in policies_list
+    ]
+    assigned = getattr(user, "assigned_policy_ids", None)
+    return UserPolicyAssignmentsResponse(
+        user_id=str(user.id),
+        username=user.username,
+        policies=policies,
+        assigned_policy_ids=assigned,
+    )
+
+
+@router.put("/{user_id}/policy-assignments", response_model=UserPolicyAssignmentsResponse)
+async def update_user_policy_assignments(
+    user_id: str,
+    body: UpdateUserPolicyAssignmentsRequest,
+    current_user: User = Depends(get_current_admin_or_manager),
+):
+    """
+    Set explicit policy IDs for this user. Empty list means no policies apply to this user.
+    """
+    import logging
+    log = logging.getLogger(__name__)
+
+    user = await _get_user_for_admin_or_manager(user_id, current_user)
+    seen = set()
+    unique_ids: List[str] = []
+    for pid in body.policy_ids:
+        if pid in seen:
+            continue
+        seen.add(pid)
+        unique_ids.append(pid)
+
+    for pid in unique_ids:
+        try:
+            pol = await Policy.get(pid)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid policy id: {pid}",
+            )
+        if not pol or getattr(pol, "is_deleted", False):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Policy not found or deleted: {pid}",
+            )
+
+    user.assigned_policy_ids = unique_ids
+    await user.save()
+    log.info(
+        "User policy assignments updated by %s for user %s (%d policies)",
+        current_user.username,
+        user.username,
+        len(unique_ids),
+    )
+
+    all_policies = await Policy.find({}).to_list()
+    policies_list = [p for p in all_policies if not getattr(p, "is_deleted", False)]
+    policies_list.sort(key=lambda x: (x.name or "").lower())
+    policies = [
+        PolicyAssignmentOption(
+            id=str(p.id),
+            name=p.name,
+            enabled=bool(p.enabled),
+            action=p.action,
+        )
+        for p in policies_list
+    ]
+    return UserPolicyAssignmentsResponse(
+        user_id=str(user.id),
+        username=user.username,
+        policies=policies,
+        assigned_policy_ids=user.assigned_policy_ids,
+    )
 
 
 @router.post("/", response_model=UserDetailResponse, status_code=status.HTTP_201_CREATED)
