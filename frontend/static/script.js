@@ -2965,7 +2965,7 @@ function buildUserActivityTableRows(operations, escapeHtml) {
     }
     return operations.map((op, idx) => {
         const metadata = previewMetadataForActivityTable(op.metadata);
-        const time = op.timestamp_server || (op.timestamp ? new Date(op.timestamp).toLocaleString() : 'N/A');
+        const time = formatAlertTimeLocal(op.timestamp, op.timestamp_server || 'N/A');
         const fileDisplay = op.file_name || (op.metadata && op.metadata.attachment_names && op.metadata.attachment_names.length ? op.metadata.attachment_names.join(', ') : 'N/A');
         const toRecipients = (op.metadata && op.metadata.to) ? (Array.isArray(op.metadata.to) ? op.metadata.to.join(', ') : String(op.metadata.to)) : '—';
         return `
@@ -3168,9 +3168,10 @@ async function showOperationDetailsModal(operation, userInfo) {
     const entityTypes = meta.detected_entity_types || [];
     const sourceUser = op.source_user || operation.source_user || (userInfo && userInfo.username) || (userInfo && userInfo.email) || 'N/A';
     const sourceInfo = sourceUser + ((op.source_ip || operation.source_ip) ? ' @ ' + (op.source_ip || operation.source_ip) : '');
-    const formattedDate = op.timestamp_server || operation.timestamp_server || (op.created_at_server) || (operation.timestamp
-        ? new Date(operation.timestamp).toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-        : (op.created_at ? new Date(op.created_at).toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A'));
+    const formattedDate = formatAlertTimeLocal(
+        op.timestamp || operation.timestamp || op.created_at,
+        op.timestamp_server || operation.timestamp_server || op.created_at_server || 'N/A'
+    );
     const title = (op.event_type || operation.event_type || 'Operation').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const actionTaken = blocked ? 'Blocked' : (hasPolicyViolation ? 'Policy applied' : 'Logged');
     const actionClass = blocked ? 'danger' : hasPolicyViolation ? 'warning' : 'info';
