@@ -128,6 +128,7 @@ class PolicyService:
                 "policies_matched": False,
                 "applied_policies": [],
                 "encrypted_text": None,
+                "masked_text": None,
             }
         
         # Get active policies (enabled and not deleted), filtered by user assignment when set
@@ -146,6 +147,7 @@ class PolicyService:
                 "policies_matched": False,
                 "applied_policies": [],
                 "encrypted_text": None,
+                "masked_text": None,
                 "last_alert_id": None,
             }
         
@@ -230,6 +232,29 @@ class PolicyService:
                     alert_created = True
                     actions_taken.append("alert_created")
             
+            elif policy.action == "anonymize":
+                logger.info(f"Applying anonymize action for policy {policy.id} ({policy.name})")
+                for entity in relevant_entities:
+                    entity["anonymized_value"] = f"[{entity['entity_type']}]"
+                    entity["original_value"] = entity.get("original_value", entity["value"])
+                    actions_taken.append(f"anonymized_{entity['entity_type']}")
+                logger.info(f"Anonymized {len(relevant_entities)} entities for policy {policy.id}")
+                if not alert_created:
+                    aid = await self._create_alert(
+                        policy=policy,
+                        detected_entities=relevant_entities,
+                        source_ip=source_ip,
+                        source_user=source_user,
+                        source_device=source_device,
+                        blocked=False,
+                        attachment_names=source_attachment_names,
+                        extra_data=alert_extra_data
+                    )
+                    if aid:
+                        last_alert_id = aid
+                    alert_created = True
+                    actions_taken.append("alert_created")
+
             elif policy.action == "alert":
                 # Create alert
                 if not alert_created:
@@ -327,7 +352,40 @@ class PolicyService:
                 logger.debug("Encrypted span at %s-%s (len %s)", start, end, len(plain_span))
             
             logger.info(f"Text encrypted: {len(entities_to_encrypt)} entities replaced")
-        
+
+        # Apply anonymization to text if anonymize policies were applied
+        masked_text = None
+        if text and any(p.action == "anonymize" for p in matching_policies):
+            masked_text = text
+            entities_to_mask: List[Dict[str, Any]] = []
+            seen_mask_spans = set()
+            for policy in matching_policies:
+                if policy.action == "anonymize":
+                    policy_entities = policy.entity_types or []
+                    for entity in detected_entities:
+                        if not entity_type_matches_policy(entity["entity_type"], policy_entities):
+                            continue
+                        if "anonymized_value" not in entity:
+                            continue
+                        key = (entity["start"], entity["end"])
+                        if key in seen_mask_spans:
+                            continue
+                        seen_mask_spans.add(key)
+                        entities_to_mask.append(entity)
+
+            entities_to_mask.sort(key=lambda x: x["start"], reverse=True)
+
+            for entity in entities_to_mask:
+                start = entity["start"]
+                end = entity["end"]
+                if start < 0 or end > len(masked_text) or start >= end:
+                    logger.warning("Skipping invalid anonymize span %s-%s", start, end)
+                    continue
+                masked_text = masked_text[:start] + entity["anonymized_value"] + masked_text[end:]
+                logger.debug("Anonymized span at %s-%s → %s", start, end, entity["anonymized_value"])
+
+            logger.info(f"Text anonymized: {len(entities_to_mask)} entities replaced")
+
         # Prepare applied policies information
         applied_policies = []
         for policy in matching_policies:
@@ -355,6 +413,7 @@ class PolicyService:
             "policies_matched": len(matching_policies) > 0,
             "applied_policies": applied_policies,
             "encrypted_text": encrypted_text,
+            "masked_text": masked_text,
             "last_alert_id": last_alert_id,
         }
     

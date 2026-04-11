@@ -107,7 +107,8 @@ async def analyze_text(
                 alert_created=result.get("alert_created", False),
                 policies_matched=result.get("policies_matched", False),
                 applied_policies=applied_policies,
-                encrypted_text=result.get("encrypted_text")
+                encrypted_text=result.get("encrypted_text"),
+                masked_text=result.get("masked_text"),
             )
         else:
             # Only analyze without applying policies
@@ -262,7 +263,8 @@ async def analyze_file(
                 alert_created=result.get("alert_created", False),
                 policies_matched=result.get("policies_matched", False),
                 applied_policies=applied_policies,
-                encrypted_text=result.get("encrypted_text")
+                encrypted_text=result.get("encrypted_text"),
+                masked_text=result.get("masked_text"),
             )
         else:
             # Only analyze without applying policies

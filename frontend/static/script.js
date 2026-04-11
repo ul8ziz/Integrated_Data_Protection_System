@@ -995,6 +995,40 @@ function displayAnalysisResult(result, fileName = null) {
                 </button>
             </div>`;
         }
+
+        // Show masked text if anonymize/masking was applied
+        if (result.masked_text) {
+            const escapedMasked = result.masked_text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+
+            const maskedForCopy = result.masked_text
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'")
+                .replace(/"/g, '\\"')
+                .replace(/\n/g, '\\n')
+                .replace(/\r/g, '\\r');
+
+            html += `<div style="margin-top: 24px; padding: 16px; background: var(--light); border-radius: 8px; border-left: 4px solid var(--warning);">
+                <h4 style="margin-top: 0; margin-bottom: 12px; color: var(--dark);">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                    </svg>
+                    Masked Text (النص بعد الإخفاء)
+                </h4>
+                <div style="background: white; padding: 12px; border-radius: 4px; border: 1px solid var(--border); font-family: monospace; word-break: break-all; white-space: pre-wrap; max-height: 300px; overflow-y: auto;">
+                    ${escapedMasked}
+                </div>
+                <button onclick="copyEncryptedText('${maskedForCopy}')" 
+                        style="margin-top: 8px; padding: 6px 12px; background: var(--warning); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem;">
+                    Copy Masked Text
+                </button>
+            </div>`;
+        }
     } else {
         html += `<div class="alert-banner alert-success">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2448,7 +2482,7 @@ function showAlertDetails(alertId, alertData) {
                         <p class="detail-value">${sourceInfo}</p>
                     </div>
                     ${(alert.attachment_names && alert.attachment_names.length) ? buildAttachmentsCardHtml(alert.attachment_names, 'Attachments', (alert.extra_data && alert.extra_data.attachment_contents) || [], (alert.extra_data && alert.extra_data.attachment_files) || []) : ''}
-                    ${(alert.extra_data && (alert.extra_data.recipient_body_preview || alert.extra_data.body_preview || alert.extra_data.body)) ? `<div class="detail-section"><h4>${alert.extra_data.recipient_body_preview ? 'Body (encrypted for recipient)' : 'Body'}</h4>${alert.extra_data.body_preview_note ? `<p class="text-muted" style="font-size:0.85rem;margin:0 0 8px;">${escapeHtml(alert.extra_data.body_preview_note)}</p>` : ''}<pre class="attachment-card-content" style="margin:0;">${escapeHtml(alert.extra_data.recipient_body_preview || alert.extra_data.body_preview || alert.extra_data.body)}</pre></div>` : ''}
+                    ${(alert.extra_data && (alert.extra_data.recipient_body_preview || alert.extra_data.body_preview || alert.extra_data.body)) ? `<div class="detail-section"><h4>${alert.extra_data.recipient_body_preview ? (alert.extra_data.body_preview_note && alert.extra_data.body_preview_note.includes('masked') ? 'Body (masked for recipient)' : 'Body (encrypted for recipient)') : 'Body'}</h4>${alert.extra_data.body_preview_note ? `<p class="text-muted" style="font-size:0.85rem;margin:0 0 8px;">${escapeHtml(alert.extra_data.body_preview_note)}</p>` : ''}<pre class="attachment-card-content" style="margin:0;">${escapeHtml(alert.extra_data.recipient_body_preview || alert.extra_data.body_preview || alert.extra_data.body)}</pre></div>` : ''}
                     <div class="detail-section">
                         <h4>Detected Entities</h4>
                         <div class="entities-container ${!hasEntities ? 'entities-empty' : ''}">${entitiesHtml}</div>
@@ -3696,8 +3730,8 @@ async function showEmailDetailModal(log) {
     const attachmentsHtml = attachmentNames.length
         ? buildAttachmentsCardHtml(attachmentNames, 'Attachments', attachmentContents, attachmentFilesList)
         : '<p class="text-muted">None</p>';
-    const bodyPreview = ed.encrypted_body != null ? ed.encrypted_body : ed.body_preview;
-    const bodyLabel = ed.encrypted_body != null ? 'Body (encrypted)' : 'Body';
+    const bodyPreview = ed.encrypted_body != null ? ed.encrypted_body : (ed.masked_body != null ? ed.masked_body : ed.body_preview);
+    const bodyLabel = ed.encrypted_body != null ? 'Body (encrypted)' : (ed.masked_body != null ? 'Body (masked / مخفي)' : 'Body');
     const bodyHtml = bodyPreview
         ? '<pre class="activity-metadata email-detail-body-pre">' + escapeHtml(bodyPreview) + '</pre>'
         : '<p class="text-muted">Body was not stored.</p>';
@@ -3944,7 +3978,7 @@ async function testEmail(event) {
             }
             
             // Show action status: block | alert | encrypt
-            const actionType = analysis.action || (analysis.blocked ? 'block' : (analysis.encrypted_text ? 'encrypt' : 'alert'));
+            const actionType = analysis.action || (analysis.blocked ? 'block' : (analysis.encrypted_text ? 'encrypt' : (analysis.masked_text ? 'anonymize' : 'alert')));
             if (actionType === 'block') {
                 resultHtml += `<div class="alert-banner alert-danger" style="margin-bottom: 16px;">`;
                 resultHtml += `<strong>🚫 Email Blocked (منع الإرسال)</strong>`;
@@ -3954,6 +3988,11 @@ async function testEmail(event) {
                 resultHtml += `<div class="alert-banner alert-success" style="margin-bottom: 16px;">`;
                 resultHtml += `<strong>🔒 Email Allowed with Encryption (السماح مع التشفير)</strong>`;
                 resultHtml += `<p class="text-muted" style="margin-top: 8px; margin-bottom: 0;">Manager notified. You can send the email with the encrypted content below.</p>`;
+                resultHtml += `</div>`;
+            } else if (actionType === 'anonymize') {
+                resultHtml += `<div class="alert-banner alert-warning" style="margin-bottom: 16px;">`;
+                resultHtml += `<strong>🔒 Email Allowed with Masking (الإخفاء)</strong>`;
+                resultHtml += `<p class="text-muted" style="margin-top: 8px; margin-bottom: 0;">Manager notified. Sensitive data has been masked in the email content below.</p>`;
                 resultHtml += `</div>`;
             } else if (actionType === 'alert') {
                 resultHtml += `<div class="alert-banner alert-warning" style="margin-bottom: 16px;">`;
@@ -4021,6 +4060,42 @@ async function testEmail(event) {
                     <button onclick="copyEncryptedText('${textForCopy}')" 
                             style="margin-top: 8px; padding: 6px 12px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem;">
                         Copy encrypted content
+                    </button>
+                </div>`;
+            }
+
+            // Show masked content if anonymize was applied
+            if (analysis.masked_text || analysis.masked_body) {
+                const maskedContent = analysis.masked_body != null ? analysis.masked_body : analysis.masked_text;
+                const escapedMasked = (maskedContent || '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+
+                const maskedForCopy = (maskedContent || '')
+                    .replace(/\\/g, '\\\\')
+                    .replace(/'/g, "\\'")
+                    .replace(/"/g, '\\"')
+                    .replace(/\n/g, '\\n')
+                    .replace(/\r/g, '\\r');
+
+                resultHtml += `<div style="margin-top: 24px; padding: 16px; background: var(--light); border-radius: 8px; border-left: 4px solid var(--warning);">
+                    <h5 style="margin-top: 0; margin-bottom: 12px;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;">
+                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                            <line x1="1" y1="1" x2="23" y2="23"></line>
+                        </svg>
+                        Masked content the recipient will receive (المحتوى بعد الإخفاء)
+                    </h5>
+                    ${analysis.masked_subject ? `<p style="margin-bottom: 8px;"><strong>Subject:</strong> <code>${String(analysis.masked_subject).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></p>` : ''}
+                    <div style="background: white; padding: 12px; border-radius: 4px; border: 1px solid var(--border); font-family: monospace; word-break: break-all; white-space: pre-wrap; max-height: 300px; overflow-y: auto;">
+                        ${escapedMasked}
+                    </div>
+                    <button onclick="copyEncryptedText('${maskedForCopy}')" 
+                            style="margin-top: 8px; padding: 6px 12px; background: var(--warning); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem;">
+                        Copy masked content
                     </button>
                 </div>`;
             }
@@ -5212,7 +5287,7 @@ function showAlertDialog(alert) {
                     <p class="detail-value">${escapeHtml(clientName)}</p>
                 </div>
                 ${(alert.attachment_names && alert.attachment_names.length) ? buildAttachmentsCardHtml(alert.attachment_names, 'Attachments', (alert.extra_data && alert.extra_data.attachment_contents) || [], (alert.extra_data && alert.extra_data.attachment_files) || []) : ''}
-                ${(alert.extra_data && (alert.extra_data.recipient_body_preview || alert.extra_data.body_preview || alert.extra_data.body)) ? `<div class="detail-section"><h4>${alert.extra_data.recipient_body_preview ? 'Body (encrypted for recipient)' : 'Body'}</h4>${alert.extra_data.body_preview_note ? `<p class="text-muted" style="font-size:0.85rem;margin:0 0 8px;">${escapeHtml(alert.extra_data.body_preview_note)}</p>` : ''}<pre class="attachment-card-content" style="margin:0;">${escapeHtml(alert.extra_data.recipient_body_preview || alert.extra_data.body_preview || alert.extra_data.body)}</pre></div>` : ''}
+                ${(alert.extra_data && (alert.extra_data.recipient_body_preview || alert.extra_data.body_preview || alert.extra_data.body)) ? `<div class="detail-section"><h4>${alert.extra_data.recipient_body_preview ? (alert.extra_data.body_preview_note && alert.extra_data.body_preview_note.includes('masked') ? 'Body (masked for recipient)' : 'Body (encrypted for recipient)') : 'Body'}</h4>${alert.extra_data.body_preview_note ? `<p class="text-muted" style="font-size:0.85rem;margin:0 0 8px;">${escapeHtml(alert.extra_data.body_preview_note)}</p>` : ''}<pre class="attachment-card-content" style="margin:0;">${escapeHtml(alert.extra_data.recipient_body_preview || alert.extra_data.body_preview || alert.extra_data.body)}</pre></div>` : ''}
                 ${desc ? `<div class="detail-section"><h4>Description</h4><p class="detail-value">${escapeHtml(desc)}</p></div>` : ''}
                 <div class="detail-section">
                     <h4>Detected Entities</h4>

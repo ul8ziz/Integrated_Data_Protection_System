@@ -50,6 +50,7 @@ class AnalysisResponse(BaseModel):
     policies_matched: bool = False
     applied_policies: List[AppliedPolicySchema] = []
     encrypted_text: Optional[str] = Field(None, description="Encrypted version of the text if encryption policies were applied")
+    masked_text: Optional[str] = Field(None, description="Anonymized version of the text if anonymize/masking policies were applied")
     timestamp: datetime = Field(default_factory=get_current_time)
     
     class Config:
