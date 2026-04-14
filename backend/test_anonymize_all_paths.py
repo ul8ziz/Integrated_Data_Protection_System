@@ -10,6 +10,7 @@ Run:
 from __future__ import annotations
 
 import asyncio
+import base64
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -462,6 +463,145 @@ class TestAnonymizeEmail:
         assert result["action"] == "anonymize"
         assert "إخفاء" in result["message"] or "masking" in result["message"].lower()
 
+    @pytest.mark.asyncio
+    async def test_email_result_includes_masked_attachment_download_payload(self):
+        ems = EmailMonitoringService()
+        subject = "Policy test"
+        body = "No body pii"
+        att_text = "Owner admin@corp.com"
+        att_b64 = base64.b64encode(att_text.encode("utf-8")).decode("ascii")
+        email = self._build_email(
+            body,
+            subject=subject,
+            attachments=[{"filename": "contacts.txt", "content": att_b64, "content_type": "text/plain"}],
+        )
+
+        full_text = f"{subject}\n\n{body}\n\n[Attachment: contacts.txt]\n{att_text}"
+        start = full_text.index("admin@corp.com")
+        end = start + len("admin@corp.com")
+        entities = [{
+            "entity_type": "EMAIL_ADDRESS",
+            "start": start,
+            "end": end,
+            "score": 0.95,
+            "value": "admin@corp.com",
+            "anonymized_value": "[EMAIL_ADDRESS]",
+        }]
+        masked_full = full_text[:start] + "[EMAIL_ADDRESS]" + full_text[end:]
+        mock_policy_result = {
+            "sensitive_data_detected": True,
+            "detected_entities": entities,
+            "actions_taken": ["anonymized_EMAIL_ADDRESS", "alert_created"],
+            "blocked": False,
+            "alert_created": True,
+            "policies_matched": True,
+            "applied_policies": [
+                {"name": "Mask emails", "action": "anonymize", "severity": "medium",
+                 "entity_types": ["EMAIL_ADDRESS"], "matched_entities": ["EMAIL_ADDRESS"], "matched_count": 1, "id": "ep4"}
+            ],
+            "encrypted_text": None,
+            "masked_text": masked_full,
+            "last_alert_id": None,
+        }
+
+        with mock.patch.object(ems.file_extractor, "is_supported", return_value=True):
+            with mock.patch.object(ems.file_extractor, "extract_text", return_value=att_text):
+                with mock.patch.object(ems.presidio, "analyze", return_value=entities):
+                    with mock.patch.object(
+                        ems.policy_service, "apply_policy_with_entities",
+                        mock.AsyncMock(return_value=mock_policy_result),
+                    ):
+                        with mock.patch.object(ems, "_log_email_event", _noop):
+                            with mock.patch.object(ems, "_store_detected_entity", _noop):
+                                result = await ems.analyze_email(email)
+
+        assert result["action"] == "anonymize"
+        assert isinstance(result.get("attachment_files"), list)
+        assert len(result["attachment_files"]) == 1
+        af = result["attachment_files"][0]
+        assert af["filename"] == "contacts.txt"
+        assert af.get("policy_masked_download") is True
+
+    @pytest.mark.asyncio
+    async def test_email_mixed_encrypt_and_anonymize_apply_together_on_attachment(self):
+        """
+        Regression: when both policies match in one email (PHONE encrypt + CREDIT_CARD anonymize),
+        recipient attachment content should include BOTH effects.
+        """
+        ems = EmailMonitoringService()
+        subject = "Mix policy"
+        body = "No body pii"
+        att_text = "Phone: +966-50-123-4567\nCredit Card: 4532-1234-5678-9012"
+        att_b64 = base64.b64encode(att_text.encode("utf-8")).decode("ascii")
+        email = self._build_email(
+            body,
+            subject=subject,
+            attachments=[{"filename": "mix.txt", "content": att_b64, "content_type": "text/plain"}],
+        )
+        full_text = f"{subject}\n\n{body}\n\n[Attachment: mix.txt]\n{att_text}"
+        phone_value = "+966-50-123-4567"
+        cc_value = "4532-1234-5678-9012"
+        phone_start = full_text.index(phone_value)
+        phone_end = phone_start + len(phone_value)
+        cc_start = full_text.index(cc_value)
+        cc_end = cc_start + len(cc_value)
+        entities = [
+            {
+                "entity_type": "PHONE_NUMBER",
+                "start": phone_start,
+                "end": phone_end,
+                "score": 0.9,
+                "value": phone_value,
+                "encrypted_value": "gAAAAA_phone_token_placeholder",
+            },
+            {
+                "entity_type": "CREDIT_CARD",
+                "start": cc_start,
+                "end": cc_end,
+                "score": 0.9,
+                "value": cc_value,
+                "anonymized_value": "[CREDIT_CARD]",
+            },
+        ]
+        # Simulate current policy_service behavior: encrypted_text only encrypts encrypt entities,
+        # masked_text only masks anonymize entities.
+        encrypted_text = full_text[:phone_start] + "gAAAAA_phone_token_placeholder" + full_text[phone_end:]
+        masked_text = full_text[:cc_start] + "[CREDIT_CARD]" + full_text[cc_end:]
+        mock_policy_result = {
+            "sensitive_data_detected": True,
+            "detected_entities": entities,
+            "actions_taken": ["encrypted_PHONE_NUMBER", "anonymized_CREDIT_CARD", "alert_created"],
+            "blocked": False,
+            "alert_created": True,
+            "policies_matched": True,
+            "applied_policies": [
+                {"name": "Phone policy", "action": "encrypt", "severity": "high",
+                 "entity_types": ["PHONE_NUMBER"], "matched_entities": ["PHONE_NUMBER"], "matched_count": 1, "id": "ep5"},
+                {"name": "Card policy", "action": "anonymize", "severity": "medium",
+                 "entity_types": ["CREDIT_CARD"], "matched_entities": ["CREDIT_CARD"], "matched_count": 1, "id": "ep6"},
+            ],
+            "encrypted_text": encrypted_text,
+            "masked_text": masked_text,
+            "last_alert_id": None,
+        }
+        with mock.patch.object(ems.file_extractor, "is_supported", return_value=True):
+            with mock.patch.object(ems.file_extractor, "extract_text", return_value=att_text):
+                with mock.patch.object(ems.presidio, "analyze", return_value=entities):
+                    with mock.patch.object(
+                        ems.policy_service, "apply_policy_with_entities",
+                        mock.AsyncMock(return_value=mock_policy_result),
+                    ):
+                        with mock.patch.object(ems, "_log_email_event", _noop):
+                            with mock.patch.object(ems, "_store_detected_entity", _noop):
+                                result = await ems.analyze_email(email)
+
+        assert result["action"] == "encrypt"
+        assert isinstance(result.get("attachment_contents"), list) and result["attachment_contents"]
+        txt = result["attachment_contents"][0]["content"]
+        assert "gAAAAA" in txt
+        assert "[CREDIT_CARD]" in txt
+        assert cc_value not in txt
+
 
 # ===========================================================================
 #  PATH 4 — Consistency: same engine produces identical masking for analysis & email
@@ -551,6 +691,8 @@ def main():
         TestAnonymizeEmail().test_email_attachment_text_anonymized,
         TestAnonymizeEmail().test_email_attachment_download_uses_masked_text_for_text_files,
         TestAnonymizeEmail().test_email_result_has_correct_message_for_anonymize,
+        TestAnonymizeEmail().test_email_result_includes_masked_attachment_download_payload,
+        TestAnonymizeEmail().test_email_mixed_encrypt_and_anonymize_apply_together_on_attachment,
         TestAnonymizeConsistency().test_same_text_same_masked_output,
         TestAnonymizeConsistency().test_email_body_uses_same_engine_offsets,
     ]

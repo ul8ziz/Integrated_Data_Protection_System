@@ -4101,6 +4101,22 @@ async function testEmail(event) {
                     </button>
                 </div>`;
             }
+
+            // Show recipient-side attachment view (after policy processing) when available.
+            if (Array.isArray(analysis.attachment_contents) && analysis.attachment_contents.length > 0) {
+                const names = analysis.attachment_contents
+                    .map(a => a && a.filename ? String(a.filename) : '')
+                    .filter(Boolean);
+                const uniqueNames = Array.from(new Set(names));
+                resultHtml += `<div style="margin-top: 16px;">` +
+                    buildAttachmentsCardHtml(
+                        uniqueNames,
+                        'Recipient attachments after policy',
+                        analysis.attachment_contents,
+                        Array.isArray(analysis.attachment_files) ? analysis.attachment_files : []
+                    ) +
+                    `</div>`;
+            }
         } else {
             resultHtml += `<div class="alert-banner alert-success">`;
             resultHtml += `<strong>✅ No Sensitive Data Detected</strong>`;

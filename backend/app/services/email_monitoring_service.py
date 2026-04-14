@@ -436,29 +436,66 @@ class EmailMonitoringService:
             # Compute body boundaries (used by both encrypt and anonymize)
             body_start = len(subject) + 2  # after "subject\n\n"
             body_end = body_start + len(body)
+            det = policy_result.get("detected_entities", [])
+            encrypt_policy_types: List[str] = []
+            anon_policy_types: List[str] = []
+            for ap in policy_result.get("applied_policies") or []:
+                if ap.get("action") == "encrypt":
+                    encrypt_policy_types.extend(ap.get("entity_types") or [])
+                elif ap.get("action") == "anonymize":
+                    anon_policy_types.extend(ap.get("entity_types") or [])
+
+            # Build one recipient-side full text that applies BOTH encrypt + anonymize policies together.
+            combined_processed_full_text: Optional[str] = None
+            if action in ("encrypt", "anonymize"):
+                entities_for_transform = [
+                    e for e in det
+                    if entity_type_matches_policy(e.get("entity_type", ""), encrypt_policy_types)
+                    or entity_type_matches_policy(e.get("entity_type", ""), anon_policy_types)
+                ]
+                entities_for_transform.sort(key=lambda x: x["start"], reverse=True)
+                if entities_for_transform:
+                    combined_processed_full_text = full_text
+                    enc = self.policy_service.encryption
+                    for e in entities_for_transform:
+                        st = e.get("start")
+                        en = e.get("end")
+                        if st is None or en is None:
+                            continue
+                        if st < 0 or en > len(combined_processed_full_text) or st >= en:
+                            continue
+                        span = combined_processed_full_text[st:en]
+                        if entity_type_matches_policy(e.get("entity_type", ""), encrypt_policy_types):
+                            repl = enc.encrypt(span)
+                        elif entity_type_matches_policy(e.get("entity_type", ""), anon_policy_types):
+                            repl = e.get("anonymized_value", f"[{e.get('entity_type', 'REDACTED')}]")
+                        else:
+                            continue
+                        combined_processed_full_text = combined_processed_full_text[:st] + repl + combined_processed_full_text[en:]
 
             # When action is encrypt: build encrypted_body (what recipient should receive)
             encrypted_body = None
             encrypted_subject = None
             if action == "encrypt" and policy_result.get("encrypted_text"):
-                det = policy_result.get("detected_entities", [])
-                encrypt_policy_types: List[str] = []
-                for ap in policy_result.get("applied_policies") or []:
-                    if ap.get("action") == "encrypt":
-                        encrypt_policy_types.extend(ap.get("entity_types") or [])
                 logger.info(
                     "Email encrypt: body_start=%d, body_end=%d, encrypt_types=%s, total_entities=%d",
                     body_start, body_end, encrypt_policy_types, len(det),
                 )
                 body_entities = [
                     e for e in det
-                    if entity_type_matches_policy(e.get("entity_type", ""), encrypt_policy_types)
+                    if (
+                        entity_type_matches_policy(e.get("entity_type", ""), encrypt_policy_types)
+                        or entity_type_matches_policy(e.get("entity_type", ""), anon_policy_types)
+                    )
                     and e["start"] >= body_start
                     and e["end"] <= body_end
                 ]
                 skipped = [
                     e for e in det
-                    if entity_type_matches_policy(e.get("entity_type", ""), encrypt_policy_types)
+                    if (
+                        entity_type_matches_policy(e.get("entity_type", ""), encrypt_policy_types)
+                        or entity_type_matches_policy(e.get("entity_type", ""), anon_policy_types)
+                    )
                     and not (e["start"] >= body_start and e["end"] <= body_end)
                 ]
                 if skipped:
@@ -485,12 +522,19 @@ class EmailMonitoringService:
                         )
                         continue
                     span = encrypted_body[start_rel:end_rel]
+                    if entity_type_matches_policy(e.get("entity_type", ""), encrypt_policy_types):
+                        repl = enc.encrypt(span)
+                    else:
+                        repl = e.get("anonymized_value", f"[{e.get('entity_type', 'REDACTED')}]")
                     encrypted_body = (
-                        encrypted_body[:start_rel] + enc.encrypt(span) + encrypted_body[end_rel:]
+                        encrypted_body[:start_rel] + repl + encrypted_body[end_rel:]
                     )
                 subject_entities = [
                     e for e in det
-                    if entity_type_matches_policy(e.get("entity_type", ""), encrypt_policy_types)
+                    if (
+                        entity_type_matches_policy(e.get("entity_type", ""), encrypt_policy_types)
+                        or entity_type_matches_policy(e.get("entity_type", ""), anon_policy_types)
+                    )
                     and e["start"] < len(subject)
                     and e["end"] <= len(subject)
                 ]
@@ -502,7 +546,11 @@ class EmailMonitoringService:
                         if st < 0 or en > len(encrypted_subject) or st >= en:
                             continue
                         span = encrypted_subject[st:en]
-                        encrypted_subject = encrypted_subject[:st] + enc.encrypt(span) + encrypted_subject[en:]
+                        if entity_type_matches_policy(e.get("entity_type", ""), encrypt_policy_types):
+                            repl = enc.encrypt(span)
+                        else:
+                            repl = e.get("anonymized_value", f"[{e.get('entity_type', 'REDACTED')}]")
+                        encrypted_subject = encrypted_subject[:st] + repl + encrypted_subject[en:]
                 else:
                     encrypted_subject = subject
 
@@ -550,8 +598,11 @@ class EmailMonitoringService:
 
             # Text extracts appended to full_text are processed in encrypted_text / masked_text; parse back for UI
             recipient_attachment_contents: Optional[List[dict]] = None
+            recipient_attachment_files: Optional[List[dict]] = None
             processed_full_text = None
-            if action == "encrypt" and policy_result.get("encrypted_text"):
+            if combined_processed_full_text:
+                processed_full_text = combined_processed_full_text
+            elif action == "encrypt" and policy_result.get("encrypted_text"):
                 processed_full_text = policy_result["encrypted_text"]
             elif action == "anonymize" and policy_result.get("masked_text"):
                 processed_full_text = policy_result["masked_text"]
@@ -620,6 +671,7 @@ class EmailMonitoringService:
                             attachment_files, recipient_attachment_contents
                         )
                         if merged_files is not None:
+                            recipient_attachment_files = merged_files
                             log_extra_data["attachment_files"] = merged_files
                     try:
                         log_extra_data["original_body_encrypted"] = self.policy_service.encryption.encrypt(body)
@@ -643,6 +695,7 @@ class EmailMonitoringService:
                             attachment_files, recipient_attachment_contents
                         )
                         if merged_files is not None:
+                            recipient_attachment_files = merged_files
                             log_extra_data["attachment_files"] = merged_files
                     log_extra_data["anonymized"] = True
                 log_extra_data["sensitive_data_detected"] = True
@@ -681,6 +734,10 @@ class EmailMonitoringService:
                 "masked_text": policy_result.get("masked_text"),
                 "masked_body": masked_body,
                 "masked_subject": masked_subject,
+                # Recipient-side attachment previews/download payloads after policy processing.
+                # For text-like files this can be encrypted/masked content; binaries may remain original bytes.
+                "attachment_contents": recipient_attachment_contents if recipient_attachment_contents else attachment_contents,
+                "attachment_files": recipient_attachment_files if recipient_attachment_files is not None else attachment_files,
                 "message": (
                     "Email blocked — لا يتم إرسال الإيميل، تم إشعار المدير." if action == "block"
                     else "Email allowed with encryption — تم تطبيق التشفير على المحتوى وإشعار المدير. يمكن إرسال الإيميل بالمحتوى المشفر." if action == "encrypt"
