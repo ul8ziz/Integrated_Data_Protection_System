@@ -111,6 +111,47 @@ def attachment_files_recipient_encrypted_text(
     return out
 
 
+def attachment_files_recipient_masked_text(
+    attachment_files: Optional[List[dict]],
+    recipient_rows: Optional[List[dict]],
+) -> Optional[List[dict]]:
+    """
+    Replace stored base64 payload with UTF-8 bytes of the masked text extract (same as inbox preview)
+    for text-like filenames so opening the downloaded file shows policy masking.
+    Binary formats (e.g. pdf, docx) keep original bytes; set download_note for admins.
+    """
+    if not attachment_files or not recipient_rows:
+        return attachment_files
+    masked_by_name = {(r.get("filename") or "").strip(): r.get("content") or "" for r in recipient_rows}
+    out: List[dict] = []
+    for af in attachment_files:
+        row = dict(af)
+        fn = (row.get("filename") or "").strip()
+        if not fn or fn not in masked_by_name:
+            out.append(row)
+            continue
+        if row.get("omitted_reason") == "file_too_large" or not row.get("content_base64"):
+            out.append(row)
+            continue
+        lower = fn.lower()
+        if not any(lower.endswith(ext) for ext in _TEXT_ATTACHMENT_EXT):
+            row["download_note"] = (
+                "Original file bytes kept for download; open text extract in the message for masked preview."
+            )
+            out.append(row)
+            continue
+        try:
+            text = masked_by_name[fn]
+            raw = text.encode("utf-8")
+            row["content_base64"] = base64.b64encode(raw).decode("ascii")
+            row["content_type"] = "text/plain; charset=utf-8"
+            row["policy_masked_download"] = True
+        except Exception as ex:
+            logger.warning("Could not build masked download for %s: %s", fn, ex)
+        out.append(row)
+    return out
+
+
 class EmailMonitoringService:
     """Service for monitoring and analyzing emails for sensitive data"""
     
@@ -597,6 +638,12 @@ class EmailMonitoringService:
                         log_extra_data["subject"] = masked_subject
                     if recipient_attachment_contents:
                         log_extra_data["attachment_contents"] = recipient_attachment_contents
+                    if recipient_attachment_contents and attachment_files:
+                        merged_files = attachment_files_recipient_masked_text(
+                            attachment_files, recipient_attachment_contents
+                        )
+                        if merged_files is not None:
+                            log_extra_data["attachment_files"] = merged_files
                     log_extra_data["anonymized"] = True
                 log_extra_data["sensitive_data_detected"] = True
                 log_extra_data["detected_entities"] = self._serialize_entities_for_log(detected_entities)

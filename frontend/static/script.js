@@ -2276,7 +2276,9 @@ function buildAttachmentsCardHtml(fileNames, title, attachmentContents, attachme
         if (af && af.content_base64 && dlIdx >= 0) {
             const dlHint = af.policy_encrypted_download
                 ? '· Encrypted text (as for recipient)'
-                : '· Original file';
+                : (af.policy_masked_download
+                    ? '· Masked text (as for recipient)'
+                    : '· Original file');
             const note = af.download_note
                 ? `<p class="attachment-download-note text-muted">${esc(af.download_note)}</p>`
                 : '';
