@@ -23,7 +23,11 @@ class PresidioService:
     
     def __init__(self):
         """Initialize Presidio analyzer"""
-        self.supported_entities = settings.PRESIDIO_SUPPORTED_ENTITIES.split(",")
+        self.supported_entities = [
+            e.strip()
+            for e in settings.PRESIDIO_SUPPORTED_ENTITIES.split(",")
+            if e and e.strip()
+        ]
         
         if PRESIDIO_AVAILABLE:
             try:
@@ -212,6 +216,83 @@ class PresidioService:
         s2, e2 = b
         return not (e1 <= s2 or e2 <= s1)
 
+    @staticmethod
+    def _is_ssn_format(s: str) -> bool:
+        """True if value looks like formatted US SSN (XXX-XX-XXXX / XXX XX XXXX)."""
+        return bool(re.match(r'^\d{3}[-.\s]\d{2}[-.\s]\d{4}$', s.strip()))
+
+    @staticmethod
+    def _is_long_digit_only(s: str) -> bool:
+        """True if value is long digit string (e.g. VAT/tax ID), not a phone."""
+        c = re.sub(r'[-.\s]', '', s)
+        return len(c) >= 14 and c.isdigit()
+
+    def _detect_custom_phone_entities(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Add resilient phone detection patterns used even when Presidio is available.
+        This captures local formats like 771-771-117 that Presidio may miss in some locales.
+        """
+        out: List[Dict[str, Any]] = []
+        phone_labeled_pattern = r'(?:Phone|الهاتف|رقم الهاتف)\s*:?\s*([^\n]{7,25})'
+        for match in re.finditer(phone_labeled_pattern, text, re.IGNORECASE):
+            phone_value = match.group(1).strip()
+            phone_value = re.sub(r'\s*\([^)]*\).*$', '', phone_value).strip()
+            phone_match = re.search(r'[\d\s\-+()]{7,25}', phone_value)
+            if not phone_match:
+                continue
+            value = phone_match.group().strip()
+            if self._is_ssn_format(value) or self._is_long_digit_only(value):
+                continue
+            out.append({
+                "entity_type": "PHONE_NUMBER",
+                "start": match.start(1) + phone_match.start(),
+                "end": match.start(1) + phone_match.end(),
+                "score": 0.9,
+                "value": value
+            })
+
+        # Covers examples like 771-771-117, 771 771 117, +966-50-123-4567, etc.
+        phone_pattern = (
+            r'\b(?:\+?\d{1,3}[-.\s]?)?'
+            r'(?:\d{2,4}[-.\s]?\d{2,4}[-.\s]?\d{2,4}(?:[-.\s]?\d{2,4})?)\b'
+        )
+        for match in re.finditer(phone_pattern, text):
+            value = match.group().strip()
+            if re.match(r'^\d{4}[-.\s]?\d{4}[-.\s]?\d{4}[-.\s]?\d{4}$', value):
+                continue  # credit card
+            if self._is_ssn_format(value) or self._is_long_digit_only(value):
+                continue
+            out.append({
+                "entity_type": "PHONE_NUMBER",
+                "start": match.start(),
+                "end": match.end(),
+                "score": 0.8,
+                "value": value
+            })
+        return out
+
+    def _merge_missing_phone_entities(
+        self,
+        base_entities: List[Dict[str, Any]],
+        phone_entities: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Merge custom phone entities into base list when they don't overlap existing PHONE_NUMBER spans.
+        """
+        merged = list(base_entities)
+        existing_phone_spans = [
+            (e["start"], e["end"])
+            for e in merged
+            if e.get("entity_type") == "PHONE_NUMBER"
+        ]
+        for p in phone_entities:
+            span = (p["start"], p["end"])
+            if any(self._spans_overlap(span, ex) for ex in existing_phone_spans):
+                continue
+            merged.append(p)
+            existing_phone_spans.append(span)
+        return merged
+
     def _dedupe_ibans(self, ibans: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Keep one IBAN per normalized value; prefer longer span (labeled line), then higher score."""
         by_val: Dict[str, Dict[str, Any]] = {}
@@ -357,16 +438,6 @@ class PresidioService:
         """Fallback regex-based analysis"""
         detected_entities = []
 
-        def _is_ssn_format(s: str) -> bool:
-            """True if value looks like US SSN (XXX-XX-XXXX) so we don't tag as phone."""
-            c = re.sub(r'[-.\s]', '', s)
-            return len(c) == 9 and c.isdigit()
-
-        def _is_long_digit_only(s: str) -> bool:
-            """True if value is long digit string (e.g. VAT/tax ID), not a phone."""
-            c = re.sub(r'[-.\s]', '', s)
-            return len(c) >= 14 and c.isdigit()
-
         # Phone number patterns (supports various formats)
         # Pattern 1: "Phone:" or "الهاتف:" followed by phone
         phone_labeled_pattern = r'(?:Phone|الهاتف|رقم الهاتف)\s*:?\s*([^\n]{7,20})'
@@ -378,7 +449,7 @@ class PresidioService:
             phone_match = re.search(r'[\d\s\-+()]{7,20}', phone_value)
             if phone_match:
                 phone_value = phone_match.group().strip()
-                if _is_ssn_format(phone_value) or _is_long_digit_only(phone_value):
+                if self._is_ssn_format(phone_value) or self._is_long_digit_only(phone_value):
                     continue
                 detected_entities.append({
                     "entity_type": "PHONE_NUMBER",
@@ -394,7 +465,7 @@ class PresidioService:
             value = match.group()
             if re.match(r'^\d{4}[-.\s]?\d{4}[-.\s]?\d{4}[-.\s]?\d{4}$', value):
                 continue  # Credit card
-            if _is_ssn_format(value) or _is_long_digit_only(value):
+            if self._is_ssn_format(value) or self._is_long_digit_only(value):
                 continue  # SSN or VAT/tax ID, not phone
             detected_entities.append({
                 "entity_type": "PHONE_NUMBER",
@@ -917,6 +988,9 @@ class PresidioService:
                 if any(e in self.supported_entities for e in ("TAX", "STOCK", "ISIN_CODE", "PROFIT")):
                     custom_financial = self._detect_custom_financial_entities(text)
                     detected_entities.extend(custom_financial)
+                # Add custom phone entities even with Presidio available (captures local formats Presidio may miss).
+                custom_phones = self._detect_custom_phone_entities(text)
+                detected_entities = self._merge_missing_phone_entities(detected_entities, custom_phones)
                 # Prefer TAX over IBAN when same value (e.g. SA123456789012345 as Tax Number)
                 tax_values = {e.get("value", "").strip() for e in detected_entities if e.get("entity_type") == "TAX"}
                 detected_entities = [

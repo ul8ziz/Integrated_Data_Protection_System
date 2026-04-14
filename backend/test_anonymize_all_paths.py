@@ -602,6 +602,61 @@ class TestAnonymizeEmail:
         assert "[CREDIT_CARD]" in txt
         assert cc_value not in txt
 
+    @pytest.mark.asyncio
+    async def test_recipient_detected_entities_mask_anonymized_values(self):
+        """
+        For anonymize in email flow, alert/log recipient entities should not expose raw values.
+        """
+        ems = EmailMonitoringService()
+        body = "ip addres: 192.168.1.1"
+        email = self._build_email(body, subject="IP test")
+        full_text = f"IP test\n\n{body}"
+        ip_value = "192.168.1.1"
+        ip_start = full_text.index(ip_value)
+        ip_end = ip_start + len(ip_value)
+        entities = [{
+            "entity_type": "IP_ADDRESS",
+            "start": ip_start,
+            "end": ip_end,
+            "score": 0.9,
+            "value": ip_value,
+            "anonymized_value": "[IP_ADDRESS]",
+        }]
+        mock_policy_result = {
+            "sensitive_data_detected": True,
+            "detected_entities": entities,
+            "actions_taken": ["anonymized_IP_ADDRESS", "alert_created"],
+            "blocked": False,
+            "alert_created": True,
+            "policies_matched": True,
+            "applied_policies": [
+                {"name": "Mask ip", "action": "anonymize", "severity": "medium",
+                 "entity_types": ["IP_ADDRESS"], "matched_entities": ["IP_ADDRESS"], "matched_count": 1, "id": "ep7"}
+            ],
+            "encrypted_text": None,
+            "masked_text": full_text[:ip_start] + "[IP_ADDRESS]" + full_text[ip_end:],
+            "last_alert_id": None,
+        }
+        captured = {}
+
+        async def _capture_log(*_a, **kwargs):
+            captured["email_data"] = kwargs.get("email_data") or {}
+            return None
+
+        with mock.patch.object(ems.presidio, "analyze", return_value=entities):
+            with mock.patch.object(
+                ems.policy_service, "apply_policy_with_entities",
+                mock.AsyncMock(return_value=mock_policy_result),
+            ):
+                with mock.patch.object(ems, "_log_email_event", _capture_log):
+                    with mock.patch.object(ems, "_store_detected_entity", _noop):
+                        await ems.analyze_email(email)
+
+        ed = captured.get("email_data") or {}
+        rec = ed.get("detected_entities_recipient") or []
+        assert rec and rec[0].get("entity_type") == "IP_ADDRESS"
+        assert rec[0].get("value") == "[IP_ADDRESS]"
+
 
 # ===========================================================================
 #  PATH 4 — Consistency: same engine produces identical masking for analysis & email
@@ -693,6 +748,7 @@ def main():
         TestAnonymizeEmail().test_email_result_has_correct_message_for_anonymize,
         TestAnonymizeEmail().test_email_result_includes_masked_attachment_download_payload,
         TestAnonymizeEmail().test_email_mixed_encrypt_and_anonymize_apply_together_on_attachment,
+        TestAnonymizeEmail().test_recipient_detected_entities_mask_anonymized_values,
         TestAnonymizeConsistency().test_same_text_same_masked_output,
         TestAnonymizeConsistency().test_email_body_uses_same_engine_offsets,
     ]

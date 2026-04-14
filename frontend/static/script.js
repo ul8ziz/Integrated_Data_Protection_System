@@ -2425,12 +2425,17 @@ function showAlertDetails(alertId, alertData) {
     const statusClass = alert.status === 'resolved' ? 'success' : alert.status === 'pending' ? 'warning' : alert.status === 'acknowledged' ? 'info' : 'secondary';
     const actionTaken = alert.action_taken || (alert.blocked ? 'Blocked' : 'Alert');
     const actionClass = alert.blocked ? 'danger' : 'info';
-    const hasEntities = alert.detected_entities && alert.detected_entities.length > 0;
+    const safeEntities = (
+        (alert.extra_data && Array.isArray(alert.extra_data.recipient_detected_entities) && alert.extra_data.recipient_detected_entities.length > 0)
+            ? alert.extra_data.recipient_detected_entities
+            : alert.detected_entities
+    ) || [];
+    const hasEntities = safeEntities.length > 0;
     
     // Format detected entities with better structure
     let entitiesHtml = '';
     if (hasEntities) {
-        entitiesHtml = alert.detected_entities.map(e => {
+        entitiesHtml = safeEntities.map(e => {
             const entityType = e.entity_type || e.type || 'Unknown';
             const entityValue = e.value || 'N/A';
             return `<div class="entity-item"><span class="entity-type-badge">${entityType}</span><span class="entity-value">${entityValue}</span></div>`;
@@ -5260,9 +5265,14 @@ function showAlertDialog(alert) {
     const statusClass = status === 'resolved' ? 'success' : status === 'pending' ? 'warning' : status === 'acknowledged' ? 'info' : 'secondary';
     const actionClass = (alert && alert.blocked) ? 'danger' : 'info';
 
-    const hasEntities = alert && alert.detected_entities && alert.detected_entities.length > 0;
+    const safeEntities = (
+        alert && alert.extra_data && Array.isArray(alert.extra_data.recipient_detected_entities) && alert.extra_data.recipient_detected_entities.length > 0
+            ? alert.extra_data.recipient_detected_entities
+            : (alert && alert.detected_entities ? alert.detected_entities : [])
+    );
+    const hasEntities = Array.isArray(safeEntities) && safeEntities.length > 0;
     const entitiesHtml = hasEntities
-        ? alert.detected_entities.map(e => {
+        ? safeEntities.map(e => {
             const t = e.entity_type || e.type || 'Unknown';
             const v = e.value || 'N/A';
             return `<div class="entity-item"><span class="entity-type-badge">${escapeHtml(t)}</span><span class="entity-value">${escapeHtml(v)}</span></div>`;

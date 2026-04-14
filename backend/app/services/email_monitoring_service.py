@@ -473,6 +473,22 @@ class EmailMonitoringService:
                             continue
                         combined_processed_full_text = combined_processed_full_text[:st] + repl + combined_processed_full_text[en:]
 
+            # Recipient-safe entity view (do not expose raw values for encrypt/anonymize-matched entities)
+            recipient_detected_entities: List[Dict[str, Any]] = []
+            if det:
+                for e in det:
+                    ev = e.get("value")
+                    et = e.get("entity_type", "")
+                    if entity_type_matches_policy(et, encrypt_policy_types):
+                        ev = e.get("encrypted_value") or "[ENCRYPTED]"
+                    elif entity_type_matches_policy(et, anon_policy_types):
+                        ev = e.get("anonymized_value") or f"[{et or 'REDACTED'}]"
+                    recipient_detected_entities.append({
+                        "entity_type": et,
+                        "score": e.get("score"),
+                        "value": ev,
+                    })
+
             # When action is encrypt: build encrypted_body (what recipient should receive)
             encrypted_body = None
             encrypted_subject = None
@@ -635,9 +651,11 @@ class EmailMonitoringService:
                             ex["recipient_subject_preview"] = recipient_subject
                         if recipient_attachment_contents:
                             ex["attachment_contents"] = recipient_attachment_contents
+                        if recipient_detected_entities:
+                            ex["recipient_detected_entities"] = recipient_detected_entities
                         ex["body_preview_note"] = (
                             f"Body and attachment text extracts (below) show {'encrypted tokens' if action == 'encrypt' else 'masked placeholders'} "
-                            "as for the recipient; entity list may still show original values for analysis."
+                            "as for the recipient."
                         )
                         alert.extra_data = ex
                         await alert.save()
@@ -700,6 +718,10 @@ class EmailMonitoringService:
                     log_extra_data["anonymized"] = True
                 log_extra_data["sensitive_data_detected"] = True
                 log_extra_data["detected_entities"] = self._serialize_entities_for_log(detected_entities)
+                if recipient_detected_entities:
+                    log_extra_data["detected_entities_recipient"] = self._serialize_entities_for_log(
+                        recipient_detected_entities
+                    )
                 log_extra_data["policies_matched"] = policy_result.get("policies_matched", False)
                 log_extra_data["analysis_action"] = action
                 log_extra_data["applied_policies_summary"] = self._applied_policies_summary(policy_result)
