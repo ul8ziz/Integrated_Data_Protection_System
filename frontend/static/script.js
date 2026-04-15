@@ -3550,10 +3550,26 @@ async function loadEmailList(page) {
 }
 
 function emailAnalysisNeedsOnDemandFetch(ed) {
+    const rec = Array.isArray(ed.detected_entities_recipient) ? ed.detected_entities_recipient : [];
+    if (rec.length > 0) return false;
     if (!Array.isArray(ed.detected_entities)) return true;
     if (ed.detected_entities.length > 0) return false;
     if (ed.sensitive_data_detected === false) return false;
     return true;
+}
+
+/** Inbox email log: prefer recipient-safe entity values (post encrypt/anonymize) when stored. */
+function emailLogDisplayEntities(ed) {
+    const raw = Array.isArray(ed && ed.detected_entities) ? ed.detected_entities : [];
+    const rec = Array.isArray(ed && ed.detected_entities_recipient) ? ed.detected_entities_recipient : [];
+    if (rec.length > 0) return rec;
+    return raw;
+}
+
+function emailLogHasEntitySnapshot(ed) {
+    const raw = Array.isArray(ed && ed.detected_entities) ? ed.detected_entities : [];
+    const rec = Array.isArray(ed && ed.detected_entities_recipient) ? ed.detected_entities_recipient : [];
+    return raw.length > 0 || rec.length > 0;
 }
 
 function buildEmailAnalysisSummaryRowFromLog(ed, escapeHtml) {
@@ -3615,6 +3631,10 @@ async function loadEmailDetailAnalysis(logId, escapeHtml) {
     const wrap = document.getElementById('emailDetailAnalysisEntitiesWrap');
     const sumRow = document.getElementById('emailDetailAnalysisSummaryRow');
     if (!wrap || !logId) return;
+    const modal = document.getElementById('emailDetailModal');
+    if (modal && modal.getAttribute('data-skip-raw-reanalysis-entities') === '1') {
+        return;
+    }
     try {
         const response = await fetch(`/api/monitoring/email/log/${encodeURIComponent(logId)}/analysis`, {
             headers: getAuthHeaders()
@@ -3655,8 +3675,8 @@ async function loadEmailDetailAnalysis(logId, escapeHtml) {
 function buildEmailAnalysisSectionHtml(ed, escapeHtml, opts) {
     opts = opts || {};
     const showLoading = !!opts.showLoadingPlaceholder;
-    const ents = ed.detected_entities;
-    const hasSnapshot = Array.isArray(ents);
+    const ents = emailLogDisplayEntities(ed);
+    const hasSnapshot = emailLogHasEntitySnapshot(ed);
     const noSensitive = ed.sensitive_data_detected === false;
     const summaryRow = buildEmailAnalysisSummaryRowFromLog(ed, escapeHtml);
 
@@ -3685,7 +3705,11 @@ function buildEmailAnalysisSectionHtml(ed, escapeHtml, opts) {
             (noSensitive ? 'No entities detected.' : 'No entities in stored snapshot.') +
             '</p>';
     } else {
-        entitiesInner = buildEmailEntitiesTableHtml(ents, escapeHtml);
+        const tableNote =
+            Array.isArray(ed.detected_entities_recipient) && ed.detected_entities_recipient.length > 0
+                ? '<p class="text-muted email-analysis-source-note" style="margin-bottom:8px;">Values shown as for the recipient after policies (encrypted tokens / placeholders). Raw values are not displayed here.</p>'
+                : '';
+        entitiesInner = tableNote + buildEmailEntitiesTableHtml(ents, escapeHtml);
     }
 
     return (
@@ -3737,16 +3761,34 @@ async function showEmailDetailModal(log) {
     const attachmentsHtml = attachmentNames.length
         ? buildAttachmentsCardHtml(attachmentNames, 'Attachments', attachmentContents, attachmentFilesList)
         : '<p class="text-muted">None</p>';
-    const bodyPreview = ed.encrypted_body != null ? ed.encrypted_body : (ed.masked_body != null ? ed.masked_body : ed.body_preview);
-    const bodyLabel = ed.encrypted_body != null ? 'Body (encrypted)' : (ed.masked_body != null ? 'Body (masked / مخفي)' : 'Body');
+    const bodyPreview =
+        ed.encrypted_body != null
+            ? ed.encrypted_body
+            : ed.masked_body != null
+              ? ed.masked_body
+              : ed.body_preview;
+    const bodyLooksEncrypted =
+        typeof bodyPreview === 'string' &&
+        bodyPreview.length > 20 &&
+        /^gAAAAA/.test(bodyPreview.trim());
+    const bodyLabel =
+        ed.encrypted_body != null || (ed.encrypted === true && bodyLooksEncrypted)
+            ? 'Body (encrypted)'
+            : ed.masked_body != null || ed.anonymized === true
+              ? 'Body (masked / مخفي)'
+              : bodyLooksEncrypted
+                ? 'Body (encrypted)'
+                : 'Body';
     const bodyHtml = bodyPreview
         ? '<pre class="activity-metadata email-detail-body-pre">' + escapeHtml(bodyPreview) + '</pre>'
         : '<p class="text-muted">Body was not stored.</p>';
     const needsFetch = emailAnalysisNeedsOnDemandFetch(ed);
     const analysisHtml = buildEmailAnalysisSectionHtml(ed, escapeHtml, { showLoadingPlaceholder: needsFetch });
     const logIdAttr = escapeHtml(log.id != null ? String(log.id) : '');
+    const skipRawReanalysis =
+        Array.isArray(ed.detected_entities_recipient) && ed.detected_entities_recipient.length > 0 ? '1' : '0';
     const modalHtml = `
-        <div class="modal-overlay show" id="emailDetailModal" onclick="closeDetailsModal(event)">
+        <div class="modal-overlay show" id="emailDetailModal" onclick="closeDetailsModal(event)" data-skip-raw-reanalysis-entities="${skipRawReanalysis}">
             <div class="modal-content alert-details-modal email-detail-dialog" data-log-id="${logIdAttr}" onclick="event.stopPropagation()">
                 <div class="alert-modal-header">
                     <div class="alert-header-content">
